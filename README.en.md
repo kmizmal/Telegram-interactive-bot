@@ -1,6 +1,7 @@
 # Telegram interactive bot (Telegram Bidirectional Bot)
 
 ## 0. Break, A friend of mine has developed a free platform of this kind of bot
+
 ### Key Features of the Hosted Version
 
 - **Privacy-First Design** – Fully compliant with the Telegram API. Pure message forwarding only — no data is ever stored!
@@ -11,7 +12,7 @@
 - **Totally Free to Use** – Core two-way customer support features are 100% free for life!
 
 **Give it a try:** @FriesOfficialBot  
-https://t.me/FriesOfficialBot
+<https://t.me/FriesOfficialBot>
 
 ## I. Introduction
 
@@ -26,6 +27,7 @@ An open-source bidirectional bot for Telegram. It helps to avoid spam messages a
 ![image-20240708130408336](./doc/cn/image-20240708130408336.png)
 
 ### Features
+
 - When a client contacts customer service through the bot, all messages will be completely forwarded to the background management group, creating a separate sub-forum named after the client's information to distinguish them from other clients.
 - Replies from customer service in the sub-forum can be directly sent to the client.
 - Customer service can configure whether to continue the conversation with the client by closing/opening the sub-forum.
@@ -33,12 +35,15 @@ An open-source bidirectional bot for Telegram. It helps to avoid spam messages a
 - Provides a /clear command to clear all messages in the sub-forum, also deleting user messages (not recommended, but sometimes necessary). There is a switch in the environment variables.
 
 ### Advantages
+
 - By using sub-forums, multiple management members can be added to share the customer service workload.
 - Complete communication records with clients can be intuitively retained.
 - It's possible to know which customer service representative replied to a particular message, maintaining coherent customer service.
 
 ## 2. Preparation
+
 The main principle of this bot is to forward the conversation between the client and the bot to a group (preferably a private group) and categorize each client's messages into a sub-category. Therefore, before starting, you need to:
+
 1. Find @BotFather and apply for a bot.
 2. Obtain the bot's token.
 3. Create a group (set as public as needed).
@@ -53,36 +58,72 @@ The main principle of this bot is to forward the conversation between the client
 ## 3. Deployment and Execution
 
 ### 1. Modify .env
+
 Open `.env_example`, fill in your bot's Token, account's API_ID/HASH, the management group's ID, and the administrator's ID. Save `.env_example` as `.env`.
 
-### 2. Build Python venv
+### 2. Get Code & Install Dependencies (using uv)
+
+```bash
+git clone https://github.com/MiHaKun/Telegram-interactive-bot.git
+cd Telegram-interactive-bot
+uv sync
 ```
-python3 -m venv venv
-. venv/bin/activate
-pip install -r requirements.txt
-```
+
+> Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
 ### 3. Start Execution
-```
-python -m interactive-bot
+
+```bash
+uv run python -m interactive-bot
 ```
 
-**Note:** For formal operation, it's recommended to use process management tools like `PM2`, `supervisor`, etc., along with watchdogs to achieve uninterrupted operation, automatic restart, and failure recovery.
+**Note:** For formal operation, it's recommended to use process management tools for uninterrupted operation, automatic restart, and failure recovery.
 
-# ToDoList
+#### systemd service (recommended for Linux servers)
+
+Create `/etc/systemd/system/telegram-bot.service`:
+
+```ini
+[Unit]
+Description=Telegram Interactive Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/Telegram-interactive-bot
+ExecStart=uv run python -m interactive-bot
+Restart=always
+RestartSec=10
+User=your-user
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Reload and enable
+sudo systemctl daemon-reload
+sudo systemctl enable telegram-bot.service
+sudo systemctl start telegram-bot.service
+# Check status
+sudo systemctl status telegram-bot.service
+```
+
+## ToDoList
+
 - [x] Support message reply functionality. Messages can reference each other.
 - [x] Improve the database.
 - [x] Add client's human-machine recognition to prevent bored individuals from using userbots to spam.
 - [x] Add and recognize media group messages.
 - [x] Streamline the code, use payload to expand forwarding parameters.
 
-# About
+## About
 
 - This product is open-source under the Apache License.
 - The author, MiHa (@MrMiHa), is a struggling programmer, not a coal miner. If you have questions, please don't come and give orders.
-- Discussion group: https://t.me/DeveloperTeamGroup. Feel free to join and play around.
+- Discussion group: <https://t.me/DeveloperTeamGroup>. Feel free to join and play around.
 - Feel free to fork, but remember to retain the content in "About".
 - The initial version was written in 2 hours. If you like it, please donate. If you have trouble deploying, ask for help in the group.
 - RackNerd's servers are recommended. In fact, I use this one. It's cheap enough.
 This one is enough: [2 cores 3GB - $27 per year](https://my.racknerd.com/aff.php?aff=11705&pid=828)
-- If you can't deploy it, you can ask everyone in the group to help. You can also share servers with everyone: https://t.me/DeveloperTeamGroup.
+- If you can't deploy it, you can ask everyone in the group to help. You can also share servers with everyone: <https://t.me/DeveloperTeamGroup>.
