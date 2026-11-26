@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram Interactive Bot
+Documentation=https://github.com/kmizmal/Telegram-interactive-bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=telegram-bot
+Group=telegram-bot
+WorkingDirectory=/opt/telegram-interactive-bot
+EnvironmentFile=/etc/telegram-interactive-bot/telegram-bot.env
+ExecStart=/usr/local/bin/uv run --frozen --no-dev python -m interactive-bot
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

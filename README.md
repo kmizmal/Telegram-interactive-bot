@@ -5,7 +5,7 @@
 Telegram的开源双向机器人。避免垃圾信息；让被限制的客户可以顺利联系到你。
 支持后台多客服。在后台群组，可以安排多个客服以同一个机器人身份持续和客户沟通。
 
-[English](https://github.com/MiHaKun/Telegram-interactive-bot/blob/master/README.en.md) | [示例机器人](https://t.me/CustomerConnectBot) | [示例后台](https://t.me/MiHaCMSGroup)
+[English](https://github.com/kmizmal/Telegram-interactive-bot/blob/master/README.en.md) | [示例机器人](https://t.me/CustomerConnectBot) | [示例后台](https://t.me/MiHaCMSGroup)
 
 （ps：和示例机器人说话后，去后台看看，就大概知道原理了）
 
@@ -50,6 +50,9 @@ Telegram的开源双向机器人。避免垃圾信息；让被限制的客户可
 
 ## 三、部署运行
 
+> 本次 uv / systemd / Docker 工程化迁移的依赖升级与验证记录见
+> [MIGRATION_NOTES.md](MIGRATION_NOTES.md)。
+
 ### 1. 修改env
 
 打开`.env_example`，将自己机器人的Token、账号的API_ID/HASH、管理群组ID和管理员ID补全。
@@ -77,41 +80,54 @@ uv run python -m interactive-bot
 
 #### 3.2 systemd 服务（推荐 Linux 服务器）
 
-创建 `/etc/systemd/system/telegram-bot.service`：
-
-```ini
-[Unit]
-Description=Telegram Interactive Bot
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/path/to/Telegram-interactive-bot
-ExecStart=uv run python -m interactive-bot
-Restart=always
-RestartSec=10
-User=your-user
-
-[Install]
-WantedBy=multi-user.target
-```
+仓库提供了可复用的服务单元 [`deploy/telegram-interactive-bot.service`](deploy/telegram-interactive-bot.service)，
+完整部署步骤（创建系统用户、安装 uv、配置 `EnvironmentFile` 等）见
+[`deploy/README.md`](deploy/README.md)。
 
 ```bash
-# 重新加载配置并启用
+# 安装服务单元
+sudo cp deploy/telegram-interactive-bot.service /etc/systemd/system/
+
+# 重载 systemd 并设置开机自启
 sudo systemctl daemon-reload
-sudo systemctl enable telegram-bot.service
-sudo systemctl start telegram-bot.service
-# 查看状态
-sudo systemctl status telegram-bot.service
-#查看实时日志
-journalctl -u telegram-bot -f
+sudo systemctl enable telegram-interactive-bot.service
+
+# 启动 / 停止 / 重启 / 查看状态
+sudo systemctl start telegram-interactive-bot.service
+sudo systemctl stop telegram-interactive-bot.service
+sudo systemctl restart telegram-interactive-bot.service
+sudo systemctl status telegram-interactive-bot.service
+
+# 查看 journal 日志（-f 实时跟随）
+sudo journalctl -u telegram-interactive-bot.service -f
 ```
 
-#### 3.3 docker 执行
+> 服务单元默认把项目放在 `/opt/telegram-interactive-bot`，环境变量文件为
+> `/etc/telegram-interactive-bot/telegram-bot.env`。如果你的路径不同，请同步修改
+> `WorkingDirectory` 和 `EnvironmentFile`。
 
-1. 安装docker ， 参看 [Install Docker under Ubuntu 22.04](https://gist.github.com/dehsilvadeveloper/c3bdf0f4cdcc5c177e2fe9be671820c7)
-2. 执行`docker build -t tgibot .` 生成一个tgibot的镜像
-3. 执行`docker run --restart always --name telegram-interactive-bot  -v "$PWD":/app tgibot:latest` 生成容器并执行。
+#### 3.3 Docker 执行
+
+```bash
+# 构建 Debian slim 镜像（非 root 运行）
+docker build -t telegram-interactive-bot:latest .
+
+# 准备 .env 后启动容器
+cp .env_example .env
+docker run -d \
+  --name telegram-interactive-bot \
+  --restart unless-stopped \
+  --env-file .env \
+  -v telegram-bot-assets:/app/assets \
+  telegram-interactive-bot:latest
+
+# 查看日志 / 停止
+docker logs -f telegram-interactive-bot
+docker stop telegram-interactive-bot
+```
+
+Docker 镜像基于 `debian:bookworm-slim`，使用 uv 执行 `uv sync --frozen --no-dev`
+安装依赖，并以非 root 用户 `bot`（UID 10001）运行。详见 [`deploy/README.md`](deploy/README.md)。
 
 <!-- markdownlint-disable MD033 -->
 <details>
