@@ -18,7 +18,7 @@
 
 An open-source bidirectional bot for Telegram. It helps to avoid spam messages and allows restricted clients to contact you smoothly.
 
-[中文文档](https://github.com/MiHaKun/Telegram-interactive-bot/blob/master/README.md) | [Sample Bot](https://t.me/CustomerConnectBot) | [Sample Backend](https://t.me/MiHaCMSGroup)
+[中文文档](https://github.com/kmizmal/Telegram-interactive-bot/blob/master/README.md) | [Sample Bot](https://t.me/CustomerConnectBot) | [Sample Backend](https://t.me/MiHaCMSGroup)
 
 (Note: After interacting with the sample bot, check the background to understand the principle.)
 
@@ -57,6 +57,9 @@ The main principle of this bot is to forward the conversation between the client
 
 ## 3. Deployment and Execution
 
+> See [MIGRATION_NOTES.md](MIGRATION_NOTES.md) for the dependency upgrades and
+> verification record of the uv / systemd / Docker migration.
+
 ### 1. Modify .env
 
 Open `.env_example`, fill in your bot's Token, account's API_ID/HASH, the management group's ID, and the administrator's ID. Save `.env_example` as `.env`.
@@ -64,7 +67,7 @@ Open `.env_example`, fill in your bot's Token, account's API_ID/HASH, the manage
 ### 2. Get Code & Install Dependencies (using uv)
 
 ```bash
-git clone https://github.com/MiHaKun/Telegram-interactive-bot.git
+git clone https://github.com/kmizmal/Telegram-interactive-bot.git
 cd Telegram-interactive-bot
 uv sync
 ```
@@ -81,33 +84,56 @@ uv run python -m interactive-bot
 
 #### systemd service (recommended for Linux servers)
 
-Create `/etc/systemd/system/telegram-bot.service`:
-
-```ini
-[Unit]
-Description=Telegram Interactive Bot
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/path/to/Telegram-interactive-bot
-ExecStart=uv run python -m interactive-bot
-Restart=always
-RestartSec=10
-User=your-user
-
-[Install]
-WantedBy=multi-user.target
-```
+A reusable unit file is provided at
+[`deploy/telegram-interactive-bot.service`](deploy/telegram-interactive-bot.service).
+See [`deploy/README.md`](deploy/README.md) for the complete setup (system user, uv
+installation, `EnvironmentFile`, and so on).
 
 ```bash
-# Reload and enable
+# Install the unit
+sudo cp deploy/telegram-interactive-bot.service /etc/systemd/system/
+
+# Reload systemd and enable at boot
 sudo systemctl daemon-reload
-sudo systemctl enable telegram-bot.service
-sudo systemctl start telegram-bot.service
-# Check status
-sudo systemctl status telegram-bot.service
+sudo systemctl enable telegram-interactive-bot.service
+
+# Start / stop / restart / status
+sudo systemctl start telegram-interactive-bot.service
+sudo systemctl stop telegram-interactive-bot.service
+sudo systemctl restart telegram-interactive-bot.service
+sudo systemctl status telegram-interactive-bot.service
+
+# Follow journal logs
+sudo journalctl -u telegram-interactive-bot.service -f
 ```
+
+> The unit expects the project at `/opt/telegram-interactive-bot` and the environment
+> file at `/etc/telegram-interactive-bot/telegram-bot.env`. Adjust `WorkingDirectory`
+> and `EnvironmentFile` if your paths differ.
+
+#### Docker
+
+```bash
+# Build the Debian slim image (runs as a non-root user)
+docker build -t telegram-interactive-bot:latest .
+
+# Prepare .env, then start the container
+cp .env_example .env
+docker run -d \
+  --name telegram-interactive-bot \
+  --restart unless-stopped \
+  --env-file .env \
+  -v telegram-bot-assets:/app/assets \
+  telegram-interactive-bot:latest
+
+# Logs / stop
+docker logs -f telegram-interactive-bot
+docker stop telegram-interactive-bot
+```
+
+The image is based on `debian:bookworm-slim`, installs dependencies with
+`uv sync --frozen --no-dev`, and runs as the non-root user `bot` (UID 10001).
+See [`deploy/README.md`](deploy/README.md) for details.
 
 ## ToDoList
 

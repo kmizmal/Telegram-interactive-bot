@@ -132,6 +132,8 @@ venv.bak/
 
 # Runtime persistence data (may contain session tokens)
 assets/*.pickle
+assets/db.sqlite3
+log.txt
 
 # OpenCode tool config
 .omo/

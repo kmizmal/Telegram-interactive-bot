@@ -1,0 +1,32 @@
+# Git and CI metadata
+.git
+.github
+
+# Local environment and secrets
+.env
+.venv
+venv/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data that must not be baked into the image
+*.log
+log.txt
+assets/db.sqlite3
+assets/*.pickle
+
+# Documentation assets are not needed at runtime
+doc/
+
+# Local editor/tooling files
+.idea/
+.vscode/
+.DS_Store
