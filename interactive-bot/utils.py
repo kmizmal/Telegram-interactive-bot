@@ -1,6 +1,5 @@
 import datetime
 
-import pytz
 from telegram.ext import ContextTypes
 
 
@@ -23,7 +22,7 @@ async def _ban_user_cb(context: ContextTypes.DEFAULT_TYPE):
     user_id, time = job.data.split('-')
     user_id = int(user_id)
     time = int(time)
-    ban_time = datetime.datetime.now(pytz.utc) + datetime.timedelta(minutes=time)
+    ban_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=time)
     print(ban_time)
     await context.bot.ban_chat_member(job.chat_id, user_id, ban_time)
 

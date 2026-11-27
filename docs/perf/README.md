@@ -4,6 +4,15 @@
 `AsyncMock` Bot 调用真实 handler，因此测量的是应用内处理耗时（含 SQLite），不含
 Telegram 网络往返。`--real` 模式会设置测试用环境变量；生产 Token 不会被读取。
 
+运行时数据层使用标准库 `sqlite3`，不再安装 SQLAlchemy/pytz。可用下面的命令确认
+入口可导入且 SQLAlchemy 没有进入 `sys.modules`：
+
+```bash
+uv run --frozen python -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; print('runtime deps ok')"
+```
+
+采集命令：
+
 ```bash
 export UV_CACHE_DIR=/root/dsh/.uv-cache
 

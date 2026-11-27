@@ -70,6 +70,10 @@ uv sync
 
 ### 3. 执行
 
+> 从旧版本升级已有数据库时，先停服备份，再按
+> [`deploy/README.md`](deploy/README.md) 执行 `python -m db.database`、两个幂等迁移和
+> 旧 `PicklePersistence` 验证码状态导入；新安装可跳过旧状态导入。
+
 #### 3.1 普通执行
 
 ```bash

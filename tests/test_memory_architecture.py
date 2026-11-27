@@ -1,5 +1,9 @@
 import gc
 import importlib
+import inspect
+import sys
+import tomllib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -64,3 +68,24 @@ async def test_broadcast_fetches_users_in_pages(monkeypatch):
     await main_mod._broadcast(context)
 
     assert pages == [(500, 0), (500, 1)]
+
+
+def test_pyproject_does_not_depend_on_sqlalchemy_or_pytz():
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text())
+    dependencies = [item.lower() for item in data["project"]["dependencies"]]
+    assert not any("sqlalchemy" in item for item in dependencies)
+    assert not any("pytz" in item for item in dependencies)
+
+
+def test_runtime_does_not_import_sqlalchemy():
+    importlib.import_module("interactive-bot.__main__")
+    assert "sqlalchemy" not in sys.modules
+
+
+def test_utils_source_uses_stdlib_timezone():
+    utils = importlib.import_module("interactive-bot.utils")
+
+    source = inspect.getsource(utils)
+    assert "pytz" not in source
+    assert "timezone.utc" in source
