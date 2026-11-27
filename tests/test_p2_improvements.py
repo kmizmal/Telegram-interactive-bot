@@ -2,8 +2,7 @@ import importlib
 import logging
 from datetime import datetime, timedelta
 
-from db.database import session_scope
-from db.model import MessageMap
+import db.database as database
 
 main_mod = importlib.import_module("interactive-bot.__main__")
 captcha = importlib.import_module("interactive-bot.services.captcha")
@@ -65,14 +64,12 @@ def test_cleanup_disabled_by_default(monkeypatch):
 
 
 def test_cleanup_dry_run_keeps_rows():
-    with session_scope() as session:
-        session.add(
-            MessageMap(
-                user_chat_message_id=900001,
-                group_chat_message_id=900002,
-                user_id=900,
-                created_at=datetime(2000, 1, 1),
-            )
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO message_map "
+            "(user_chat_message_id, group_chat_message_id, user_id, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (900001, 900002, 900, "2000-01-01 00:00:00"),
         )
 
     result = cleanup.cleanup_old_message_maps(retention_days=90, dry_run=True)
@@ -82,37 +79,31 @@ def test_cleanup_dry_run_keeps_rows():
 
 def test_cleanup_deletes_only_old_rows():
     old_id, recent_id = 920001, 920003
-    with session_scope() as session:
-        session.add(
-            MessageMap(
-                user_chat_message_id=old_id,
-                group_chat_message_id=920002,
-                user_id=920,
-                created_at=datetime(2000, 1, 1),
-            )
+    recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO message_map "
+            "(user_chat_message_id, group_chat_message_id, user_id, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (old_id, 920002, 920, "2000-01-01 00:00:00"),
         )
-        session.add(
-            MessageMap(
-                user_chat_message_id=recent_id,
-                group_chat_message_id=920004,
-                user_id=920,
-                created_at=datetime.now() - timedelta(days=1),
-            )
+        connection.execute(
+            "INSERT INTO message_map "
+            "(user_chat_message_id, group_chat_message_id, user_id, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (recent_id, 920004, 920, recent),
         )
 
     result = cleanup.cleanup_old_message_maps(retention_days=90, dry_run=False)
 
     assert result["deleted"] >= 1
-    with session_scope() as session:
-        assert (
-            session.query(MessageMap)
-            .filter(MessageMap.user_chat_message_id == old_id)
-            .count()
-            == 0
+    counts = {
+        row[0]: row[1]
+        for row in database.connect().execute(
+            "SELECT user_chat_message_id, COUNT(*) FROM message_map "
+            "WHERE user_chat_message_id IN (?, ?) GROUP BY user_chat_message_id",
+            (old_id, recent_id),
         )
-        assert (
-            session.query(MessageMap)
-            .filter(MessageMap.user_chat_message_id == recent_id)
-            .count()
-            == 1
-        )
+    }
+    assert counts.get(old_id, 0) == 0
+    assert counts.get(recent_id, 0) == 1

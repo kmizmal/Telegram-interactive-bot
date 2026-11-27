@@ -18,7 +18,7 @@ from telegram.ext import (
 from telegram.helpers import mention_html
 
 from db import repository
-from db.database import Base, engine
+from db.database import init_db
 from db.executor import run_db
 
 from . import (
@@ -46,9 +46,9 @@ BROADCAST_MAX_PARALLEL = 5
 BROADCAST_RATE_PER_SECOND = 20
 DELETE_MESSAGES_CHUNK = 100
 
-# create_all is safe on an existing database; new indexes are added by
-# db/migrations/perf_indexes.py during deployment.
-Base.metadata.create_all(bind=engine)
+# Idempotent schema creation for fresh installs; existing databases are
+# upgraded by the migrations under db/migrations/ during deployment.
+init_db()
 
 
 def persistence_interval() -> int:

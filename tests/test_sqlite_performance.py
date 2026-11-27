@@ -1,11 +1,8 @@
 import importlib
 import sqlite3
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-
 database = importlib.import_module("db.database")
-model = importlib.import_module("db.model")
+repository = importlib.import_module("db.repository")
 migration = importlib.import_module("db.migrations.perf_indexes")
 
 EXPECTED_INDEXES = {
@@ -20,73 +17,103 @@ EXPECTED_INDEXES = {
 }
 
 
-def test_model_declares_hot_indexes():
-    tables = model.Base.metadata.tables
-    for table_name, expected in EXPECTED_INDEXES.items():
-        actual = {index.name for index in tables[table_name].indexes}
-        assert expected <= actual, table_name
+def test_init_db_creates_expected_tables():
+    database.init_db()
+    names = {
+        row[0]
+        for row in database.connect().execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    assert {
+        "user",
+        "message_map",
+        "formn_status",
+        "media_group_message",
+        "user_state",
+    } <= names
 
 
-def test_primary_keys_have_no_redundant_index():
-    tables = model.Base.metadata.tables
-    for table_name in EXPECTED_INDEXES:
-        actual = {index.name for index in tables[table_name].indexes}
-        assert f"ix_{table_name}_id" not in actual
+def test_sqlite_pragmas_are_applied():
+    connection = database.connect()
+    assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert connection.execute("PRAGMA synchronous").fetchone()[0] == 1
+    assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    assert connection.execute("PRAGMA cache_size").fetchone()[0] == -512
+    assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
-def test_message_map_created_at_is_nullable():
-    column = model.Base.metadata.tables["message_map"].columns["created_at"]
-    assert column.nullable is True
+def test_transaction_commits():
+    database.init_db()
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO user (user_id, first_name) VALUES (?, ?)", (998, "commit")
+        )
+    assert database.connect().execute(
+        "SELECT COUNT(*) FROM user WHERE user_id=?", (998,)
+    ).fetchone()[0] == 1
 
 
-def test_engine_pool_is_bounded():
-    assert database.POOL_SIZE == 5
-    assert database.MAX_OVERFLOW == 5
-    assert database.engine.pool._max_overflow == database.MAX_OVERFLOW
-
-
-def test_sqlite_pragmas_are_applied(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'pragmas.sqlite'}")
-    database.apply_sqlite_pragmas(engine)
-
-    with engine.connect() as connection:
-        assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
-        assert connection.execute(text("PRAGMA synchronous")).scalar() == 1
-        assert connection.execute(text("PRAGMA busy_timeout")).scalar() == 5000
-
-
-def test_session_scope_commits(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'scope.sqlite'}")
-    model.Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
-
-    with database.session_scope(factory) as session:
-        session.add(model.User(user_id=42, first_name="A"))
-
-    reader = factory()
+def test_transaction_rolls_back():
+    database.init_db()
     try:
-        assert reader.query(model.User).filter_by(user_id=42).one() is not None
-    finally:
-        reader.close()
-
-
-def test_session_scope_rolls_back(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'rollback.sqlite'}")
-    model.Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
-
-    try:
-        with database.session_scope(factory) as session:
-            session.add(model.User(user_id=43, first_name="B"))
+        with database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO user (user_id, first_name) VALUES (?, ?)",
+                (999, "rollback"),
+            )
             raise RuntimeError("boom")
     except RuntimeError:
         pass
+    assert database.connect().execute(
+        "SELECT COUNT(*) FROM user WHERE user_id=?", (999,)
+    ).fetchone()[0] == 0
 
-    reader = factory()
+
+def test_repository_roundtrip():
+    database.init_db()
+    user = repository.get_or_create_user(1001, "Round", "Trip")
+    assert user.user_id == 1001
+    repository.set_user_thread(1001, 77)
+    repository.create_message_map(1001, 2001, 1001)
+
+    assert repository.find_message_map_by_user_chat(1001, 1001) == 2001
+    assert repository.get_user_by_user_id(1001).message_thread_id == 77
+
+
+def test_repository_batch_insert_commits_once():
+    database.init_db()
+    statements = []
+    database.set_trace_callback(statements.append)
     try:
-        assert reader.query(model.User).filter_by(user_id=43).count() == 0
+        repository.create_message_maps_batch(
+            [(3001, 4001, 15), (3002, 4002, 15), (3003, 4003, 15)]
+        )
     finally:
-        reader.close()
+        database.set_trace_callback(None)
+
+    assert sum(1 for statement in statements if statement.strip().upper() == "COMMIT") == 1
+
+
+def test_message_map_created_at_default():
+    database.init_db()
+    repository.create_message_map(1002, 2002, 1002)
+    row = database.connect().execute(
+        "SELECT created_at FROM message_map WHERE user_chat_message_id=1002"
+    ).fetchone()
+    assert row is not None
+    assert row[0] is not None
+
+
+def test_user_state_repository_roundtrip():
+    database.init_db()
+    assert repository.get_user_state(2001).is_human is False
+    repository.set_user_vcode(2001, "abc")
+    assert repository.get_user_state(2001).vcode == "abc"
+    repository.mark_user_human(2001)
+    assert repository.get_user_state(2001).is_human is True
+    repository.set_user_captcha_error(2001, 123.5)
+    assert repository.get_user_state(2001).is_human_error_time == 123.5
 
 
 LEGACY_SCHEMA = """

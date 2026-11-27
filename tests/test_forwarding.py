@@ -3,11 +3,8 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import event
 
 import db.database as database
-import db.model as model
-from db.database import session_scope
 
 main_mod = importlib.import_module("interactive-bot.__main__")
 probe = importlib.import_module("scripts.perf_probe")
@@ -17,37 +14,33 @@ executor = importlib.import_module("db.executor")
 
 class SQLCounter:
     def __init__(self):
-        self.user_selects = 0
-        self.commits = 0
+        self.statements = []
 
     def install(self):
-        def before_cursor(connection, cursor, statement, parameters, context, many=False):
-            lowered = statement.lower()
-            if lowered.startswith("select") and "from user" in lowered:
-                self.user_selects += 1
-
-        def on_commit(connection):
-            self.commits += 1
-
-        self._before = before_cursor
-        self._commit = on_commit
-        event.listen(database.engine, "before_cursor_execute", before_cursor)
-        event.listen(database.engine, "commit", on_commit)
+        database.set_trace_callback(self.statements.append)
 
     def remove(self):
-        event.remove(database.engine, "before_cursor_execute", self._before)
-        event.remove(database.engine, "commit", self._commit)
+        database.set_trace_callback(None)
+
+    @property
+    def user_selects(self):
+        return sum(
+            1
+            for statement in self.statements
+            if statement.lstrip().upper().startswith("SELECT")
+            and "FROM USER" in statement.upper()
+        )
+
+    @property
+    def commits(self):
+        return sum(
+            1 for statement in self.statements if statement.strip().upper() == "COMMIT"
+        )
 
 
 def _seed_user(user_id=1, thread_id=7):
-    with session_scope() as session:
-        session.add(
-            model.User(
-                user_id=user_id,
-                first_name="Seeded",
-                message_thread_id=thread_id,
-            )
-        )
+    repository.get_or_create_user(user_id, "Seeded")
+    repository.set_user_thread(user_id, thread_id)
 
 
 @pytest.mark.asyncio
@@ -106,7 +99,7 @@ def test_repository_returns_plain_dto():
     dto = repository.get_user_by_user_id(14)
 
     assert dto.user_id == 14
-    assert not isinstance(dto, model.User)
+    assert isinstance(dto, repository.UserDTO)
 
 
 def test_repository_batch_insert_commits_once():
