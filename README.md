@@ -157,4 +157,18 @@ Docker 镜像基于 `debian:bookworm-slim`，使用 uv 执行 `uv sync --frozen 
 ## 详细部署文档
 
 [米哈同学的知识库](https://miha.uk/docs/tutor/telegram-interactive-bot/)
+
+## 性能与测试
+
+本项目已完成 uv 迁移与性能优化。开发/回归命令：
+
+```bash
+uv sync --frozen
+uv run --frozen pytest -q
+uv run --frozen python scripts/perf_probe.py --self-test
+```
+
+性能计划、环境变量开关与迁移步骤见
+[PERFORMANCE_REFACTORING_PLAN.md](PERFORMANCE_REFACTORING_PLAN.md)、
+[deploy/README.md](deploy/README.md) 与 [docs/perf/README.md](docs/perf/README.md)。
 </details>
