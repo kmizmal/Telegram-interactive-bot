@@ -142,7 +142,15 @@ def _configured_bot() -> AsyncMock:
     async def _with_message_id(*args, **kwargs):
         return SimpleNamespace(message_id=777, message_thread_id=7)
 
+    async def _copy_messages(*args, **kwargs):
+        message_ids = kwargs.get("message_ids") or ()
+        return tuple(
+            SimpleNamespace(message_id=777 + index)
+            for index in range(len(message_ids))
+        )
+
     bot.copy_message.side_effect = _with_message_id
+    bot.copy_messages.side_effect = _copy_messages
     bot.send_message.side_effect = _with_message_id
     bot.create_forum_topic.side_effect = _with_message_id
     bot.get_chat.side_effect = lambda *a, **kw: SimpleNamespace(
