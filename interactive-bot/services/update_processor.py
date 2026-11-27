@@ -9,8 +9,9 @@ per-user state stay intact.
 import asyncio
 import os
 import time
+import weakref
 
-_user_locks: dict[int, asyncio.Lock] = {}
+_user_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
 
 
 def concurrency_limit() -> int:
@@ -30,12 +31,17 @@ def configure_builder(builder):
 
 
 def user_lock(context, user_id) -> asyncio.Lock:
-    """Return a stable per-user lock (never persisted by PicklePersistence)."""
+    """Return a stable per-user lock while the caller holds a reference."""
     lock = _user_locks.get(user_id)
     if lock is None:
         lock = asyncio.Lock()
         _user_locks[user_id] = lock
     return lock
+
+
+def lock_count() -> int:
+    """Return the number of live per-user locks (tests/diagnostics)."""
+    return len(_user_locks)
 
 
 class TokenBucket:

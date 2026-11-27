@@ -56,7 +56,11 @@ async def test_user_lock_serializes_same_user():
 @pytest.mark.asyncio
 async def test_broadcast_copies_once_per_user_and_retries(monkeypatch):
     users = [SimpleNamespace(user_id=user_id) for user_id in (101, 102, 103)]
-    monkeypatch.setattr(main_mod.repository, "get_all_users", lambda: users)
+    monkeypatch.setattr(
+        main_mod.repository,
+        "get_users_page",
+        lambda limit, offset: users[offset : offset + limit],
+    )
 
     calls = []
 
@@ -79,7 +83,11 @@ async def test_broadcast_copies_once_per_user_and_retries(monkeypatch):
 @pytest.mark.asyncio
 async def test_broadcast_uses_at_most_five_parallel_sends(monkeypatch):
     users = [SimpleNamespace(user_id=user_id) for user_id in range(200, 215)]
-    monkeypatch.setattr(main_mod.repository, "get_all_users", lambda: users)
+    monkeypatch.setattr(
+        main_mod.repository,
+        "get_users_page",
+        lambda limit, offset: users[offset : offset + limit],
+    )
 
     active = 0
     peak = 0

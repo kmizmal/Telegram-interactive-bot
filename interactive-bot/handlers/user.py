@@ -20,6 +20,7 @@ from .. import (
     welcome_message,
 )
 from ..services.captcha import image_choices
+from ..services.memory_cache import avatar_cache, captcha_image_cache
 from ..utils import delete_message_later
 
 
@@ -44,13 +45,12 @@ async def send_contact_card(
         f"📱 {user.id}\n\n"
         f"🔗 @{user.username if user.username else '无'}"
     )
-    avatar_key = f"avatar|{user.id}"
-    photo_id = context.bot_data.get(avatar_key)
+    photo_id = avatar_cache.get(user.id)
     if not photo_id:
         user_photo = await context.bot.get_user_profile_photos(user.id)
         if user_photo.total_count:
             photo_id = user_photo.photos[0][-1].file_id
-            context.bot_data[avatar_key] = photo_id
+            avatar_cache.set(user.id, photo_id)
     if photo_id:
         await context.bot.send_photo(
             chat_id,
@@ -115,7 +115,7 @@ async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE, user_s
         codes.append(code)
         random.shuffle(codes)
 
-        photo = context.bot_data.get(f"image|{code}") or file
+        photo = captcha_image_cache.get(code) or file
         buttons = [
             InlineKeyboardButton(text, callback_data=f"vcode_{text}_{user.id}")
             for text in codes
@@ -128,7 +128,7 @@ async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE, user_s
             parse_mode="HTML",
         )
         biggest_photo = sorted(sent.photo, key=lambda x: x.file_size, reverse=True)[0]
-        context.bot_data[f"image|{code}"] = biggest_photo.file_id
+        captcha_image_cache.set(code, biggest_photo.file_id)
         await run_db(repository.set_user_vcode, user.id, code)
         await delete_message_later(60, sent.chat.id, sent.message_id, context)
         return False
