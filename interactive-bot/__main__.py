@@ -1,3 +1,4 @@
+import asyncio
 import os
 import random
 import time
@@ -5,7 +6,7 @@ from string import ascii_letters as letters
 
 import telegram
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
+from telegram.error import BadRequest, RetryAfter
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -35,7 +36,12 @@ from . import (
     message_interval,
 )
 from .observability import stage_timer
+from .services.update_processor import TokenBucket, configure_builder, user_lock
 from .utils import delete_message_later
+
+BROADCAST_MAX_PARALLEL = 5
+BROADCAST_RATE_PER_SECOND = 20
+DELETE_MESSAGES_CHUNK = 100
 
 # create_all is safe on an existing database; new indexes are added by
 # db/migrations/perf_indexes.py during deployment.
@@ -222,6 +228,11 @@ async def callback_query_vcode(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with user_lock(context, update.effective_user.id):
+        await _forwarding_message_u2a(update, context)
+
+
+async def _forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with stage_timer("handler", handler="u2a"):
         if not disable_captcha and not await check_human(update, context):
             return
@@ -330,6 +341,11 @@ async def forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def forwarding_message_a2u(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with user_lock(context, update.effective_user.id):
+        await _forwarding_message_a2u(update, context)
+
+
+async def _forwarding_message_a2u(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with stage_timer("handler", handler="a2u"):
         user = update.effective_user
         await run_db(
@@ -431,25 +447,54 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         return
     message_ids = await run_db(repository.get_message_ids_for_user, target.user_id)
-    if message_ids:
-        await context.bot.delete_messages(target.user_id, message_ids)
+    for start in range(0, len(message_ids), DELETE_MESSAGES_CHUNK):
+        chunk = message_ids[start : start + DELETE_MESSAGES_CHUNK]
+        try:
+            await context.bot.delete_messages(target.user_id, chunk)
+        except BadRequest as error:
+            logger.warning(f"clear chunk failed: {error}")
     await run_db(repository.delete_message_maps_for_user, target.user_id)
 
 
 async def _broadcast(context: ContextTypes.DEFAULT_TYPE):
     users = await run_db(repository.get_all_users)
     msg_id, chat_id = context.job.data.split("_")
-    success = 0
-    failed = 0
-    for user in users:
-        try:
-            await context.bot.copy_message(
-                chat_id=user.user_id, from_chat_id=chat_id, message_id=int(msg_id)
-            )
-            success += 1
-        except Exception:
-            failed += 1
-    logger.info(f"broadcast done: success={success} failed={failed}")
+    bucket = TokenBucket(BROADCAST_RATE_PER_SECOND)
+    semaphore = asyncio.Semaphore(BROADCAST_MAX_PARALLEL)
+    results = {"success": 0, "failed": 0, "rate_limited": 0, "failures": []}
+
+    async def send_one(user):
+        async with semaphore:
+            await bucket.acquire()
+            for attempt in range(3):
+                try:
+                    await context.bot.copy_message(
+                        chat_id=user.user_id,
+                        from_chat_id=chat_id,
+                        message_id=int(msg_id),
+                    )
+                    results["success"] += 1
+                    return
+                except RetryAfter as error:
+                    results["rate_limited"] += 1
+                    if attempt == 2:
+                        break
+                    delay = error.retry_after
+                    await asyncio.sleep(
+                        delay.total_seconds()
+                        if hasattr(delay, "total_seconds")
+                        else float(delay)
+                    )
+                except Exception as error:
+                    results["failures"].append((user.user_id, str(error)))
+                    break
+            results["failed"] += 1
+
+    await asyncio.gather(*(send_one(user) for user in users))
+    logger.info(
+        f"broadcast done: success={results['success']} failed={results['failed']} "
+        f"rate_limited={results['rate_limited']} failures={results['failures'][:10]}"
+    )
 
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,12 +527,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 if __name__ == "__main__":
     pickle_persistence = PicklePersistence(filepath=f"./assets/{app_name}.pickle")
-    application = (
+    builder = (
         ApplicationBuilder()
         .token(bot_token)
         .persistence(persistence=pickle_persistence)
-        .build()
     )
+    application = configure_builder(builder).build()
 
     application.add_handler(CommandHandler("start", start, filters.ChatType.PRIVATE))
     application.add_handler(

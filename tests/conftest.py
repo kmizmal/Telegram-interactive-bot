@@ -18,6 +18,7 @@ os.environ.setdefault("ADMIN_GROUP_ID", "-1001234567890")
 os.environ.setdefault("ADMIN_USER_IDS", "1,2")
 os.environ.setdefault("PERF_LOG", "0")
 os.environ.setdefault("PERF_SAMPLE_RATE", "1")
+os.environ.setdefault("PTB_TIMEDELTA", "1")
 os.environ.setdefault("DISABLE_CAPTCHA", "TRUE")
 os.environ.setdefault("MESSAGE_INTERVAL", "0")
 
