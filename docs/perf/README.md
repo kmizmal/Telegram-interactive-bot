@@ -17,7 +17,8 @@ DATABASE_URL="sqlite:///$TMPDB" uv run --frozen python scripts/perf_probe.py \
 rm -f "$TMPDB"
 
 # 回归门禁：任一 p50/p95/p99/mean 恶化超过 10% 即返回 1
-uv run --frozen python scripts/perf_probe.py --compare docs/perf/baseline-2026-11-27.json
+uv run --frozen python scripts/perf_probe.py --real \
+  --compare docs/perf/baseline-2026-11-27.json
 ```
 
 ## 2026-11-27 结果（300 次/场景）

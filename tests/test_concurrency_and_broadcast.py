@@ -4,7 +4,11 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from telegram.error import RetryAfter
+from telegram.error import BadRequest, RetryAfter
+
+from db import repository
+from db.database import session_scope
+from db.model import User
 
 main_mod = importlib.import_module("interactive-bot.__main__")
 processor = importlib.import_module("interactive-bot.services.update_processor")
@@ -101,30 +105,23 @@ async def test_broadcast_uses_at_most_five_parallel_sends(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_clear_chunks_deletes_and_removes_maps(monkeypatch):
-    message_ids = list(range(1, 251))
-    monkeypatch.setattr(
-        main_mod.repository,
-        "get_user_by_thread",
-        lambda thread_id: SimpleNamespace(user_id=77),
-    )
-    monkeypatch.setattr(
-        main_mod.repository, "get_message_ids_for_user", lambda user_id: message_ids
-    )
-    removed = []
-    monkeypatch.setattr(
-        main_mod.repository,
-        "delete_message_maps_for_user",
-        lambda user_id: removed.append(user_id),
+async def test_clear_retries_rate_limit_and_keeps_failed_chunk_mappings(monkeypatch):
+    with session_scope() as session:
+        session.add(User(user_id=77, message_thread_id=314))
+    repository.create_message_maps_batch(
+        [(message_id, message_id + 1000, 77) for message_id in range(1, 251)]
+        + [(1, 5000, 78)]
     )
     monkeypatch.setattr(main_mod, "is_delete_user_messages", True)
-
     bot = probe._configured_bot()
-    context = probe.make_context(bot)
-    update = probe.build_update("clear", user_id=1, chat_id=-1001)
+    bot.delete_messages.side_effect = [True, BadRequest("cannot delete"),
+                                       RetryAfter(timedelta(milliseconds=1)), True]
+    update = probe.build_update("clear", user_id=1, chat_id=-1001, thread_id=314)
 
-    await main_mod.clear(update, context)
+    await main_mod.clear(update, probe.make_context(bot))
 
     chunks = [call.args[1] for call in bot.delete_messages.await_args_list]
-    assert [len(chunk) for chunk in chunks] == [100, 100, 50]
-    assert removed == [77]
+    assert [len(chunk) for chunk in chunks] == [100, 100, 50, 50]
+    assert chunks[2] == chunks[3]
+    assert sorted(repository.get_message_ids_for_user(77)) == list(range(101, 201))
+    assert repository.get_message_ids_for_user(78) == [1]

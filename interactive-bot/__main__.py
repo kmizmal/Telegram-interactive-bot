@@ -172,6 +172,9 @@ async def _forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_
             )
             message_thread_id = formn.message_thread_id
             first_message_new_thread = True
+            if update.message.media_group_id:
+                # Albums enqueue a separate job rather than writing a map below.
+                await run_db(repository.set_user_thread, user.id, message_thread_id)
             await context.bot.send_message(
                 chat_id,
                 f"新的用户 {mention_html(user.id, user.full_name)} 开始了一个新的会话。",
@@ -184,7 +187,7 @@ async def _forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_
         if update.message.reply_to_message:
             reply_in_user_chat = update.message.reply_to_message.message_id
             group_message_id = await run_db(
-                repository.find_message_map_by_user_chat, reply_in_user_chat
+                repository.find_message_map_by_user_chat, user.id, reply_in_user_chat
             )
             if group_message_id:
                 params["reply_to_message_id"] = group_message_id
@@ -351,13 +354,40 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         return
     message_ids = await run_db(repository.get_message_ids_for_user, target.user_id)
+    deleted_ids = []
+    failed_count = 0
     for offset in range(0, len(message_ids), DELETE_MESSAGES_CHUNK):
         chunk = message_ids[offset : offset + DELETE_MESSAGES_CHUNK]
-        try:
-            await context.bot.delete_messages(target.user_id, chunk)
-        except BadRequest as error:
-            logger.warning(f"clear chunk failed: {error}")
-    await run_db(repository.delete_message_maps_for_user, target.user_id)
+        for attempt in range(3):
+            try:
+                await context.bot.delete_messages(target.user_id, chunk)
+            except RetryAfter as error:
+                if attempt == 2:
+                    logger.warning(f"clear chunk rate limited: {error}")
+                    failed_count += len(chunk)
+                    break
+                delay = error.retry_after
+                await asyncio.sleep(
+                    delay.total_seconds()
+                    if hasattr(delay, "total_seconds")
+                    else float(delay)
+                )
+            except BadRequest as error:
+                logger.warning(f"clear chunk failed: {error}")
+                failed_count += len(chunk)
+                break
+            else:
+                deleted_ids.extend(chunk)
+                break
+    if deleted_ids:
+        await run_db(
+            repository.delete_message_maps_for_user, target.user_id, deleted_ids
+        )
+    if failed_count:
+        logger.warning(
+            f"clear retained {failed_count} message maps for user {target.user_id} "
+            "after failed deletions"
+        )
 
 
 async def _broadcast(context: ContextTypes.DEFAULT_TYPE):

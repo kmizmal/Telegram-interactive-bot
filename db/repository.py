@@ -132,12 +132,17 @@ def set_formn_status(message_thread_id, status, chat_id=None) -> None:
             row.status = status
 
 
-def find_message_map_by_user_chat(message_id) -> int | None:
+def find_message_map_by_user_chat(user_id, message_id) -> int | None:
+    """Resolve a private-chat message ID within its owning user's chat."""
     with session_scope() as session:
         row = (
             session.query(MessageMap)
-            .filter(MessageMap.user_chat_message_id == message_id)
-            .one_or_none()
+            .filter(
+                MessageMap.user_id == user_id,
+                MessageMap.user_chat_message_id == message_id,
+            )
+            .order_by(MessageMap.id.desc())
+            .first()
         )
         return row.group_chat_message_id if row else None
 
@@ -259,10 +264,10 @@ def delete_old_message_maps(cutoff: datetime) -> int:
         )
 
 
-def delete_message_maps_for_user(user_id) -> None:
+def delete_message_maps_for_user(user_id, message_ids=None) -> None:
+    """Delete a user's maps, optionally only the listed private-chat message IDs."""
     with session_scope() as session:
-        (
-            session.query(MessageMap)
-            .filter(MessageMap.user_id == user_id)
-            .delete(synchronize_session=False)
-        )
+        query = session.query(MessageMap).filter(MessageMap.user_id == user_id)
+        if message_ids is not None:
+            query = query.filter(MessageMap.user_chat_message_id.in_(message_ids))
+        query.delete(synchronize_session=False)

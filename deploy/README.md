@@ -79,10 +79,19 @@ sudo journalctl -u telegram-interactive-bot.service -n 200 --no-pager
 
 ```bash
 cd /opt/telegram-interactive-bot
+sudo systemctl stop telegram-interactive-bot.service
 sudo -u telegram-bot git pull --ff-only
 sudo -u telegram-bot /usr/local/bin/uv sync --frozen --no-dev
-sudo systemctl restart telegram-interactive-bot.service
+# 备份数据库（含 WAL/SHM）后执行幂等迁移，迁移失败不要启动服务
+sudo -u telegram-bot cp -a assets/db.sqlite3 "assets/db.sqlite3.bak-$(date +%Y%m%d-%H%M%S)"
+sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.migrations.perf_indexes \
+  --database assets/db.sqlite3
+sudo systemctl start telegram-interactive-bot.service
 ```
+
+> 从旧版本升级到含性能优化的版本时，`message_map.created_at` 与新索引不会由
+> `Base.metadata.create_all()` 自动补齐，必须先停服、备份并运行上面的迁移命令；
+> 迁移会输出 `integrity: ok`，失败时保持服务停止并从备份恢复。
 
 > 服务单元中的关键配置：
 > - `After=network-online.target` + `Wants=network-online.target`：等待网络就绪。
@@ -122,6 +131,14 @@ docker run -d \
   -v telegram-bot-assets:/app/assets \
   telegram-interactive-bot:latest
 ```
+
+> **已有数据卷升级**：先 `docker stop` 旧容器并备份卷内 `db.sqlite3`（含 `-wal`/`-shm`），
+> 再用新镜像执行一次迁移，最后启动新容器：
+>
+> ```bash
+> docker run --rm -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
+>   /app/.venv/bin/python -m db.migrations.perf_indexes --database /app/assets/db.sqlite3
+> ```
 
 `/app/assets` 用于持久化 SQLite 数据库、Pickle 会话文件和日志；首次创建命名卷时
 会从镜像复制 `assets/` 初始内容。

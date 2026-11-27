@@ -1,5 +1,6 @@
 import importlib
 import threading
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event
@@ -119,3 +120,41 @@ def test_repository_batch_insert_commits_once():
         counter.remove()
 
     assert counter.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_first_album_reuses_persisted_topic_and_routes_later_copy():
+    bot = probe._configured_bot()
+    context = probe.make_context(bot)
+    for message_id in (2101, 2102):
+        await main_mod.forwarding_message_u2a(
+            probe.build_update(
+                "media", user_id=21, chat_id=21, message_id=message_id,
+                media_group_id="first-album",
+            ),
+            context,
+        )
+
+    assert repository.get_user_by_user_id(21).message_thread_id == 7
+    assert bot.create_forum_topic.await_count == 1
+    assert context.job_queue.run_once.call_count == 1
+    (callback, _), job = context.job_queue.run_once.call_args
+    context.job = SimpleNamespace(data=job["data"], name=job["name"])
+    await callback(context)
+
+    assert bot.copy_messages.await_args.kwargs["message_thread_id"] == 7
+    assert bot.copy_messages.await_args.kwargs["message_ids"] == [2101, 2102]
+
+
+@pytest.mark.asyncio
+async def test_reply_uses_own_private_chat_when_message_ids_collide():
+    _seed_user(user_id=22, thread_id=20)
+    _seed_user(user_id=23, thread_id=21)
+    repository.create_message_maps_batch([(99, 801, 22), (99, 802, 23)])
+    bot = probe._configured_bot()
+    await main_mod.forwarding_message_u2a(
+        probe.build_update("reply", user_id=23, chat_id=23, message_id=2201),
+        probe.make_context(bot),
+    )
+
+    assert bot.copy_message.await_args.kwargs["reply_to_message_id"] == 802
