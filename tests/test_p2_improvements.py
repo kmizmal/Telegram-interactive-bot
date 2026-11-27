@@ -27,11 +27,6 @@ def test_logging_uses_rotating_file_handler():
     assert handlers[0].backupCount == 5
 
 
-def test_persistence_interval_reads_env(monkeypatch):
-    monkeypatch.setenv("PERSISTENCE_INTERVAL", "300")
-    assert main_mod.persistence_interval() == 300
-
-
 def test_allowed_updates_limits_polling():
     assert main_mod.allowed_updates() == ["message", "callback_query"]
 

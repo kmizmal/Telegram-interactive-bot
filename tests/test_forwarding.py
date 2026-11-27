@@ -1,4 +1,5 @@
 import importlib
+import re
 import threading
 from types import SimpleNamespace
 
@@ -28,7 +29,7 @@ class SQLCounter:
             1
             for statement in self.statements
             if statement.lstrip().upper().startswith("SELECT")
-            and "FROM USER" in statement.upper()
+            and re.search(r"\bFROM\s+USER\b", statement, re.IGNORECASE)
         )
 
     @property

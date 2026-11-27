@@ -10,9 +10,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    ConversationHandler,
     MessageHandler,
-    PicklePersistence,
     filters,
 )
 from telegram.helpers import mention_html
@@ -49,13 +47,6 @@ DELETE_MESSAGES_CHUNK = 100
 # Idempotent schema creation for fresh installs; existing databases are
 # upgraded by the migrations under db/migrations/ during deployment.
 init_db()
-
-
-def persistence_interval() -> int:
-    try:
-        return max(1, int(os.getenv("PERSISTENCE_INTERVAL", "300")))
-    except ValueError:
-        return 300
 
 
 def allowed_updates() -> list[str]:
@@ -138,7 +129,8 @@ async def forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_T
 
 async def _forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with stage_timer("handler", handler="u2a"):
-        if not disable_captcha and not await check_human(update, context):
+        user_state = await run_db(repository.get_user_state, update.effective_user.id)
+        if not disable_captcha and not await check_human(update, context, user_state):
             return
         if message_interval:
             if context.user_data.get("last_message_time", 0) > time.time() - message_interval:
@@ -448,11 +440,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def error_in_send_media_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_html("错误的消息类型。退出发送媒体组。后续对话将直接转发。")
-    return ConversationHandler.END
-
-
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
     logger.error(f"Exception while handling an update: {context.error} ")
@@ -468,15 +455,10 @@ async def _cleanup_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 if __name__ == "__main__":
-    pickle_persistence = PicklePersistence(
-        filepath=f"./assets/{app_name}.pickle",
-        update_interval=persistence_interval(),
-    )
     http = http_settings()
     builder = (
         ApplicationBuilder()
         .token(bot_token)
-        .persistence(persistence=pickle_persistence)
         .connection_pool_size(http["connection_pool_size"])
         .pool_timeout(http["pool_timeout"])
         .connect_timeout(http["connect_timeout"])
