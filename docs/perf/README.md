@@ -30,6 +30,28 @@ uv run --frozen python scripts/perf_probe.py --real \
   --compare docs/perf/baseline-2026-11-27.json
 ```
 
+## 内存采样与验收
+
+改造后使用 `scripts/memory_probe.py` 从 `/proc/<pid>/status` 读取 RSS、VmData 和线程数，
+按 JSON Lines 输出。验收目标：30 分钟 idle RSS ≤55 MB；24 小时首小时与末小时中位数
+增长 ≤3 MB，线程数保持平稳。
+
+```bash
+uv run --frozen python scripts/memory_probe.py --self-check
+
+# 30 分钟验收（服务单元名按实际部署替换，例如 telegram-bot.service）
+PID=$(systemctl show -p MainPID --value telegram-bot.service)
+uv run --frozen python scripts/memory_probe.py --pid "$PID" \
+  --interval 60 --duration 1800 > /tmp/tg-memory-30m.jsonl
+
+# 24 小时巡检
+uv run --frozen python scripts/memory_probe.py --pid "$PID" \
+  --interval 300 --duration 86400 > /tmp/tg-memory-24h.jsonl
+```
+
+改造前基线：[memory-baseline-2026-11-27.json](memory-baseline-2026-11-27.json)；上线后另存
+`memory-after-2026-11-27.json` 作为对比。
+
 ## 2026-11-27 结果（300 次/场景）
 
 | 场景 | p50 前 → 后 (ms) | p95 前 → 后 (ms) | p99 前 → 后 (ms) |
