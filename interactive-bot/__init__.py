@@ -1,19 +1,30 @@
-import os
-import sys
-import json
 import logging
+import logging.handlers
+import os
+
 from dotenv import load_dotenv
 
-
-# 配置日志记录器
+# 配置日志记录器。systemd journal 收集 stdout；文件日志可选且带轮转。
+_handlers = [logging.StreamHandler()]
+if os.getenv("LOG_TO_FILE", "1") == "1":
+    _handlers.append(
+        logging.handlers.RotatingFileHandler(
+            "log.txt", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
+    )
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(name)s- %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("log.txt")],
+    handlers=_handlers,
 )
 logging.getLogger("httpx").setLevel(logging.ERROR)
 current_package = os.path.basename(os.path.dirname(__file__))
 logger = logging.getLogger(current_package)
+if os.getenv("LOG_TO_FILE", "1") == "1" and not any(
+    isinstance(handler, logging.handlers.RotatingFileHandler)
+    for handler in (*logger.handlers, *logging.getLogger().handlers)
+):
+    logger.addHandler(_handlers[-1])
 
 # 读取配置文件
 load_dotenv()

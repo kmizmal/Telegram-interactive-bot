@@ -1,10 +1,6 @@
 import datetime
-import io
-import random
-from string import ascii_letters as letters
 
 import pytz
-from telegram import ChatMember, ChatMemberUpdated
 from telegram.ext import ContextTypes
 
 
@@ -13,7 +9,7 @@ async def _delete_message_cb(context: ContextTypes.DEFAULT_TYPE):
     msg_id = job.data
     try:
         await context.bot.delete_message(job.chat_id, msg_id)
-    except Exception as e:
+    except Exception:
         pass
 
 

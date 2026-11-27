@@ -79,10 +79,19 @@ sudo journalctl -u telegram-interactive-bot.service -n 200 --no-pager
 
 ```bash
 cd /opt/telegram-interactive-bot
+sudo systemctl stop telegram-interactive-bot.service
 sudo -u telegram-bot git pull --ff-only
 sudo -u telegram-bot /usr/local/bin/uv sync --frozen --no-dev
-sudo systemctl restart telegram-interactive-bot.service
+# 备份数据库（含 WAL/SHM）后执行幂等迁移，迁移失败不要启动服务
+sudo -u telegram-bot cp -a assets/db.sqlite3 "assets/db.sqlite3.bak-$(date +%Y%m%d-%H%M%S)"
+sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.migrations.perf_indexes \
+  --database assets/db.sqlite3
+sudo systemctl start telegram-interactive-bot.service
 ```
+
+> 从旧版本升级到含性能优化的版本时，`message_map.created_at` 与新索引不会由
+> `Base.metadata.create_all()` 自动补齐，必须先停服、备份并运行上面的迁移命令；
+> 迁移会输出 `integrity: ok`，失败时保持服务停止并从备份恢复。
 
 > 服务单元中的关键配置：
 > - `After=network-online.target` + `Wants=network-online.target`：等待网络就绪。
@@ -123,6 +132,14 @@ docker run -d \
   telegram-interactive-bot:latest
 ```
 
+> **已有数据卷升级**：先 `docker stop` 旧容器并备份卷内 `db.sqlite3`（含 `-wal`/`-shm`），
+> 再用新镜像执行一次迁移，最后启动新容器：
+>
+> ```bash
+> docker run --rm -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
+>   /app/.venv/bin/python -m db.migrations.perf_indexes --database /app/assets/db.sqlite3
+> ```
+
 `/app/assets` 用于持久化 SQLite 数据库、Pickle 会话文件和日志；首次创建命名卷时
 会从镜像复制 `assets/` 初始内容。
 
@@ -143,4 +160,41 @@ docker run --rm --entrypoint id telegram-interactive-bot:latest
 # 确认依赖和项目入口可导入（不连接 Telegram）
 docker run --rm --entrypoint /app/.venv/bin/python telegram-interactive-bot:latest \
   -c "import telegram, sqlalchemy, httpx, dotenv, pytz, apscheduler; print('deps ok')"
+
+## 三、性能配置、迁移与观测
+
+升级到含性能优化的版本后，**先执行数据库迁移，再启动服务**（幂等，可重复执行）：
+
+```bash
+cd /opt/telegram-interactive-bot
+sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.migrations.perf_indexes \
+  --database assets/db.sqlite3
+sudo systemctl restart telegram-interactive-bot.service
+```
+
+迁移会补 `message_map.created_at`、六个热字段二级索引，并删除主键上的冗余索引；
+启用 WAL 后请确保备份同时包含 `db.sqlite3-wal` 与 `db.sqlite3-shm`。
+
+可选环境变量（写入 `EnvironmentFile`，均保持默认即可获得优化收益）：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `PERF_LOG` | `0` | `1` 时向 journal 输出 JSON 性能记录 |
+| `PERF_SAMPLE_RATE` | `1` | 性能日志采样率，`0.1` 表示 10% |
+| `PERF_CONCURRENT_UPDATES` | `0` | `2/4/8` 开启受控并发；上线后逐级放量 |
+| `PERSISTENCE_INTERVAL` | `300` | PicklePersistence flush 间隔（秒） |
+| `LOG_TO_FILE` | `1` | `0` 时只写 journal；文件为 10MB × 5 轮转 |
+| `HTTP_POOL_SIZE` | `8` | Telegram HTTP 连接池大小 |
+| `ENABLE_DATA_CLEANUP` | `0` | `1` 时启用每日 03:00 的映射清理（默认关闭） |
+| `MESSAGE_MAP_RETENTION_DAYS` | `90` | 保留天数；清理前请先用 dry-run 核对 |
+
+本地回归验证：
+
+```bash
+uv sync --frozen
+uv run --frozen pytest -q
+uv run --frozen python scripts/perf_probe.py --self-test
+```
+
+详见 [性能计划](../PERFORMANCE_REFACTORING_PLAN.md) 与 [基线说明](../docs/perf/README.md)。
 ```
