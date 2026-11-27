@@ -77,3 +77,41 @@ def test_pickle_persistence_is_gone():
     source = inspect.getsource(main_mod)
     assert "PicklePersistence" not in source
     assert not hasattr(main_mod, "persistence_interval")
+
+
+def test_pickle_import_rejects_missing_database(tmp_path):
+    pickle_path = tmp_path / "legacy.pickle"
+    pickle_path.write_bytes(pickle.dumps({"user_data": {123: {"is_human": True}}}))
+    missing_db = tmp_path / "missing.sqlite"
+    assert import_pickle_state.main(
+        ["--pickle", str(pickle_path), "--database", str(missing_db)]
+    ) == 2
+    assert not missing_db.exists()
+
+
+def test_pickle_import_does_not_overwrite_existing_user_state(tmp_path):
+    database_path = tmp_path / "import.sqlite"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(SCHEMA_SQL)
+    connection.execute(
+        "INSERT INTO user_state (user_id, is_human, vcode, is_human_error_time) "
+        "VALUES (123, 1, 'new-code', NULL)"
+    )
+    connection.commit()
+    connection.close()
+    pickle_path = tmp_path / "legacy.pickle"
+    pickle_path.write_bytes(
+        pickle.dumps({"user_data": {123: {"is_human": False, "vcode": "old-code"}}})
+    )
+
+    assert import_pickle_state.main(
+        ["--pickle", str(pickle_path), "--database", str(database_path)]
+    ) == 0
+    connection = sqlite3.connect(database_path)
+    try:
+        state = connection.execute(
+            "SELECT is_human, vcode FROM user_state WHERE user_id=123"
+        ).fetchone()
+        assert state == (1, "new-code")
+    finally:
+        connection.close()

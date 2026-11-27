@@ -27,6 +27,7 @@ RUN uv sync --frozen --no-dev
 # Copy application source after dependency installation.
 COPY interactive-bot/ ./interactive-bot/
 COPY db/ ./db/
+COPY scripts/ ./scripts/
 COPY assets/ ./assets/
 
 # Run as an unprivileged user; /app must stay writable for SQLite, pickle and log.txt.

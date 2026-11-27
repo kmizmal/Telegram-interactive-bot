@@ -400,7 +400,8 @@ async def _broadcast(context: ContextTypes.DEFAULT_TYPE):
                         else float(delay)
                     )
                 except Exception as error:
-                    results["failures"].append((user.user_id, str(error)))
+                    if len(results["failures"]) < 100:
+                        results["failures"].append((user.user_id, str(error)))
                     break
             results["failed"] += 1
 

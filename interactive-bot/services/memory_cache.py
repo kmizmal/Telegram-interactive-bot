@@ -54,7 +54,7 @@ class TTLCache:
 
 avatar_cache = TTLCache(maxsize=2048, ttl_seconds=7 * 24 * 3600)
 captcha_image_cache = TTLCache(maxsize=128, ttl_seconds=7 * 24 * 3600)
-_message_times = TTLCache(maxsize=4096, ttl_seconds=3600)
+_message_times = TTLCache(maxsize=4096, ttl_seconds=7 * 24 * 3600)
 
 
 def rate_limit_ok(user_id: int, interval: float) -> bool:

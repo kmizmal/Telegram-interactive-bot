@@ -84,6 +84,7 @@ sudo -u telegram-bot git pull --ff-only
 sudo -u telegram-bot /usr/local/bin/uv sync --frozen --no-dev
 # 备份数据库（含 WAL/SHM）后执行初始化与幂等迁移，失败不要启动服务
 sudo -u telegram-bot cp -a assets/db.sqlite3 "assets/db.sqlite3.bak-$(date +%Y%m%d-%H%M%S)"
+sudo -u telegram-bot sh -c 'for f in assets/db.sqlite3-wal assets/db.sqlite3-shm; do [ -f "$f" ] && cp -a "$f" "$f.bak-$(date +%Y%m%d-%H%M%S)" || true; done'
 sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.database
 sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.migrations.perf_indexes \
   --database assets/db.sqlite3
@@ -95,8 +96,8 @@ sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python scripts/impo
 sudo systemctl start telegram-interactive-bot.service
 ```
 
-> 从旧版本升级时，`user_state` 表、`message_map.created_at` 与新索引不会由
-> 启动初始化自动补齐到已有库，必须先停服、备份并运行上面的命令；迁移会输出
+> 从旧版本升级时，`message_map.created_at` 与新索引不会由启动初始化自动补齐到
+> 已有库，必须先停服、备份并运行上面的命令；迁移会输出
 > `integrity: ok`，失败时保持服务停止并从备份恢复。
 
 > 服务单元中的关键配置：
@@ -142,15 +143,18 @@ docker run -d \
 > 再用新镜像依次执行初始化、两个幂等迁移和旧验证码状态导入，最后启动新容器：
 >
 > ```bash
-> docker run --rm -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
->   /app/.venv/bin/python -m db.database
-> docker run --rm -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
->   /app/.venv/bin/python -m db.migrations.perf_indexes --database /app/assets/db.sqlite3
-> docker run --rm -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
->   /app/.venv/bin/python -m db.migrations.user_state --database /app/assets/db.sqlite3
+> docker run --rm --entrypoint /app/.venv/bin/python \
+>   -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest -m db.database
+> docker run --rm --entrypoint /app/.venv/bin/python \
+>   -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
+>   -m db.migrations.perf_indexes --database /app/assets/db.sqlite3
+> docker run --rm --entrypoint /app/.venv/bin/python \
+>   -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
+>   -m db.migrations.user_state --database /app/assets/db.sqlite3
 > # 仅旧版本有 PicklePersistence 文件时执行；fresh install 跳过
-> docker run --rm -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
->   /app/.venv/bin/python scripts/import_pickle_state.py \
+> docker run --rm --entrypoint /app/.venv/bin/python \
+>   -v telegram-bot-assets:/app/assets telegram-interactive-bot:latest \
+>   scripts/import_pickle_state.py \
 >   --pickle /app/assets/<APP_NAME>.pickle --database /app/assets/db.sqlite3
 > ```
 
@@ -172,7 +176,7 @@ docker rm telegram-interactive-bot
 docker run --rm --entrypoint id telegram-interactive-bot:latest
 
 # 确认依赖和项目入口可导入（不连接 Telegram，并确认 SQLAlchemy 不在运行时）
-docker run --rm --entrypoint /app/.venv/bin/python telegram-interactive-bot:latest \
+docker run --rm --env-file .env --entrypoint /app/.venv/bin/python telegram-interactive-bot:latest \
   -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; import telegram, httpx, dotenv, apscheduler; print('deps ok')"
 ```
 
@@ -182,6 +186,10 @@ docker run --rm --entrypoint /app/.venv/bin/python telegram-interactive-bot:late
 
 ```bash
 cd /opt/telegram-interactive-bot
+sudo systemctl stop telegram-interactive-bot.service
+# 备份主库及 WAL/SHM；服务已停，副本才是完整快照
+sudo -u telegram-bot cp -a assets/db.sqlite3 "assets/db.sqlite3.bak-$(date +%Y%m%d-%H%M%S)"
+sudo -u telegram-bot sh -c 'for f in assets/db.sqlite3-wal assets/db.sqlite3-shm; do [ -f "$f" ] && cp -a "$f" "$f.bak-$(date +%Y%m%d-%H%M%S)" || true; done'
 sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.database
 sudo -u telegram-bot /usr/local/bin/uv run --frozen --no-dev python -m db.migrations.perf_indexes \
   --database assets/db.sqlite3
@@ -219,4 +227,3 @@ uv run --frozen python scripts/perf_probe.py --self-test
 ```
 
 详见 [性能计划](../PERFORMANCE_REFACTORING_PLAN.md) 与 [基线说明](../docs/perf/README.md)。
-```

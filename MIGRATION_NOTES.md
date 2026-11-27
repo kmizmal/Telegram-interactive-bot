@@ -1,5 +1,9 @@
 # 工程化迁移说明（uv / systemd / Docker）
 
+> 历史记录：本文件描述 2026-11-26 的 uv/systemd/Docker 迁移，当时仍使用
+> SQLAlchemy/pytz。当前 `perf/memory-optimization` 已改为标准库 sqlite3；最新部署
+> 与迁移步骤以 `deploy/README.md` 为准。
+
 - 基线版本：`master` @ `3bbc2eb`（`docx:Update README.md`）
 - 完成日期：2026-11-26
 - 变更范围：依赖管理、systemd 部署、Docker 镜像、CI 与文档

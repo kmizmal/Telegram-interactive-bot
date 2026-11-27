@@ -8,7 +8,8 @@ Telegram 网络往返。`--real` 模式会设置测试用环境变量；生产 T
 入口可导入且 SQLAlchemy 没有进入 `sys.modules`：
 
 ```bash
-uv run --frozen python -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; print('runtime deps ok')"
+BOT_TOKEN=test APP_NAME=perf-probe ADMIN_GROUP_ID=-1000000000000 ADMIN_USER_IDS=1 \
+  uv run --frozen python -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; print('runtime deps ok')"
 ```
 
 采集命令：

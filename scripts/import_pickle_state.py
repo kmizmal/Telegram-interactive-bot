@@ -22,8 +22,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from db.migrations.user_state import USER_STATE_DDL  # noqa: E402
-
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -51,10 +49,20 @@ def main(argv=None) -> int:
         print("pickle user_data is not a mapping")
         return 1
 
-    connection = sqlite3.connect(args.database)
+    database_path = Path(args.database)
+    if not database_path.exists():
+        print(f"database not found: {database_path}")
+        return 2
+
+    connection = sqlite3.connect(database_path)
     imported = 0
     try:
-        connection.execute(USER_STATE_DDL)
+        table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_state'"
+        ).fetchone()
+        if table_exists is None:
+            print(f"user_state table missing: run db.migrations.user_state first")
+            return 2
         for raw_user_id, state in user_data.items():
             if not isinstance(state, dict):
                 continue
@@ -73,9 +81,15 @@ def main(argv=None) -> int:
                     (user_id, is_human, vcode, is_human_error_time)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    is_human=excluded.is_human,
-                    vcode=excluded.vcode,
-                    is_human_error_time=excluded.is_human_error_time
+                    is_human=CASE
+                        WHEN user_state.is_human=1 THEN 1
+                        ELSE excluded.is_human
+                    END,
+                    vcode=COALESCE(user_state.vcode, excluded.vcode),
+                    is_human_error_time=COALESCE(
+                        user_state.is_human_error_time,
+                        excluded.is_human_error_time
+                    )
                 """,
                 (user_id, is_human, vcode, error_time),
             )

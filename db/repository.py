@@ -108,7 +108,8 @@ def get_user_by_thread(message_thread_id) -> UserDTO | None:
 def set_user_thread(user_id, message_thread_id) -> None:
     with transaction() as connection:
         connection.execute(
-            "UPDATE user SET message_thread_id=? WHERE user_id=?",
+            "UPDATE user SET message_thread_id=?, updated_at=CURRENT_TIMESTAMP "
+            "WHERE user_id=?",
             (message_thread_id, user_id),
         )
 
@@ -122,7 +123,8 @@ def set_user_thread_and_create_map(
     """Persist the new forum topic and its first message map in one commit."""
     with transaction() as connection:
         connection.execute(
-            "UPDATE user SET message_thread_id=? WHERE user_id=?",
+            "UPDATE user SET message_thread_id=?, updated_at=CURRENT_TIMESTAMP "
+            "WHERE user_id=?",
             (message_thread_id, user_id),
         )
         connection.execute(

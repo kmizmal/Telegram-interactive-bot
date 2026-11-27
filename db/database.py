@@ -18,6 +18,7 @@ from typing import Callable, Iterator
 from db.schema import SCHEMA_SQL
 
 _LOCK = threading.RLock()
+_TX_DEPTH = threading.local()
 _CONNECTION: sqlite3.Connection | None = None
 _TRACE_CALLBACK: Callable[[str], None] | None = None
 
@@ -80,15 +81,24 @@ def set_trace_callback(callback: Callable[[str], None] | None) -> None:
 
 @contextmanager
 def transaction() -> Iterator[sqlite3.Connection]:
-    """Run a short write transaction under the process lock."""
+    """Run a short write transaction under the process lock.
+
+    Nested transactions are rejected: SQLite has no nested transaction here,
+    and committing an inner scope would silently commit the outer one.
+    """
     with _LOCK:
+        if getattr(_TX_DEPTH, "depth", 0):
+            raise RuntimeError("nested transaction is not supported")
         connection = connect()
+        _TX_DEPTH.depth = 1
         try:
             yield connection
             connection.commit()
-        except Exception:
+        except BaseException:
             connection.rollback()
             raise
+        finally:
+            _TX_DEPTH.depth = 0
 
 
 @contextmanager
@@ -98,11 +108,22 @@ def read_connection() -> Iterator[sqlite3.Connection]:
         yield connect()
 
 
+def _upgrade_existing_schema(connection: sqlite3.Connection) -> None:
+    """Apply additive fixes that CREATE TABLE IF NOT EXISTS cannot make."""
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(message_map)")}
+    if "created_at" not in columns:
+        connection.execute("ALTER TABLE message_map ADD COLUMN created_at DATETIME")
+    connection.execute(
+        "UPDATE message_map SET created_at=CURRENT_TIMESTAMP WHERE created_at IS NULL"
+    )
+
+
 def init_db() -> None:
-    """Create all tables and indexes if they do not exist yet."""
+    """Create all tables/indexes and upgrade additive columns on existing DBs."""
     with _LOCK:
         connection = connect()
         connection.executescript(SCHEMA_SQL)
+        _upgrade_existing_schema(connection)
         connection.commit()
 
 

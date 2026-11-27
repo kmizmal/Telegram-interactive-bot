@@ -1,6 +1,9 @@
 import gc
 import importlib
 import inspect
+import os
+import sqlite3
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -89,3 +92,34 @@ def test_utils_source_uses_stdlib_timezone():
     source = inspect.getsource(utils)
     assert "pytz" not in source
     assert "timezone.utc" in source
+
+
+def test_init_db_upgrades_old_message_map_schema(tmp_path):
+    database_path = tmp_path / "old.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        "CREATE TABLE message_map ("
+        "id INTEGER PRIMARY KEY, user_chat_message_id INTEGER, "
+        "group_chat_message_id INTEGER, user_id INTEGER)"
+    )
+    connection.commit()
+    connection.close()
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite:///{database_path}"
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [sys.executable, "-c", "import db.database as d; d.init_db(); d.close()"],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    connection = sqlite3.connect(database_path)
+    try:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(message_map)")}
+        assert "created_at" in columns
+    finally:
+        connection.close()
