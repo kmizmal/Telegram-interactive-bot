@@ -24,9 +24,10 @@ def migrate(database_path) -> dict:
         added_column = "created_at" not in columns
         if added_column:
             connection.execute("ALTER TABLE message_map ADD COLUMN created_at DATETIME")
-            connection.execute(
-                "UPDATE message_map SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
-            )
+        # Always backfill NULLs: a previous interrupted run may have left them.
+        connection.execute(
+            "UPDATE message_map SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
+        )
 
         connection.executescript(SQL_FILE.read_text(encoding="utf-8"))
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]

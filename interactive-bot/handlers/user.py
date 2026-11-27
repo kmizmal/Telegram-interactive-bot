@@ -20,6 +20,7 @@ from .. import (
     welcome_message,
 )
 from ..services.captcha import image_choices
+from ..services.memory_cache import avatar_cache, captcha_image_cache
 from ..utils import delete_message_later
 
 
@@ -44,13 +45,12 @@ async def send_contact_card(
         f"📱 {user.id}\n\n"
         f"🔗 @{user.username if user.username else '无'}"
     )
-    avatar_key = f"avatar|{user.id}"
-    photo_id = context.bot_data.get(avatar_key)
+    photo_id = avatar_cache.get(user.id)
     if not photo_id:
         user_photo = await context.bot.get_user_profile_photos(user.id)
         if user_photo.total_count:
             photo_id = user_photo.photos[0][-1].file_id
-            context.bot_data[avatar_key] = photo_id
+            avatar_cache.set(user.id, photo_id)
     if photo_id:
         await context.bot.send_photo(
             chat_id,
@@ -102,10 +102,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state):
     user = update.effective_user
-    if not context.user_data.get("is_human", False):
-        if context.user_data.get("is_human_error_time", 0) > time.time() - 120:
+    if not user_state.is_human:
+        if (user_state.is_human_error_time or 0) > time.time() - 120:
             await update.message.reply_html("你已经被禁言,请稍后再尝试。")
             return False
         file_name = random.choice(image_choices())
@@ -115,7 +115,7 @@ async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE):
         codes.append(code)
         random.shuffle(codes)
 
-        photo = context.bot_data.get(f"image|{code}") or file
+        photo = captcha_image_cache.get(code) or file
         buttons = [
             InlineKeyboardButton(text, callback_data=f"vcode_{text}_{user.id}")
             for text in codes
@@ -128,8 +128,8 @@ async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
         biggest_photo = sorted(sent.photo, key=lambda x: x.file_size, reverse=True)[0]
-        context.bot_data[f"image|{code}"] = biggest_photo.file_id
-        context.user_data["vcode"] = code
+        captcha_image_cache.set(code, biggest_photo.file_id)
+        await run_db(repository.set_user_vcode, user.id, code)
         await delete_message_later(60, sent.chat.id, sent.message_id, context)
         return False
     return True
@@ -141,15 +141,16 @@ async def callback_query_vcode(update: Update, context: ContextTypes.DEFAULT_TYP
     code = query.data.split("_")[1]
     user_id = query.data.split("_")[2]
     if user_id == str(user.id):
-        if code == context.user_data.get("vcode"):
+        state = await run_db(repository.get_user_state, user.id)
+        if code == state.vcode:
             await query.answer("正确，欢迎。")
             await context.bot.send_message(
                 update.effective_chat.id,
                 f"{mention_html(user.id, user.first_name)} , 欢迎。",
                 parse_mode="HTML",
             )
-            context.user_data["is_human"] = True
+            await run_db(repository.mark_user_human, user.id)
         else:
             await query.answer("~错误~，禁言2分钟")
-            context.user_data["is_human_error_time"] = time.time()
+            await run_db(repository.set_user_captcha_error, user.id, time.time())
     await query.message.delete()

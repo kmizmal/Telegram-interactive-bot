@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 from datetime import time as time_of_day
 
 from telegram import Update
@@ -10,21 +9,18 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    ConversationHandler,
     MessageHandler,
-    PicklePersistence,
     filters,
 )
 from telegram.helpers import mention_html
 
 from db import repository
-from db.database import Base, engine
+from db.database import init_db
 from db.executor import run_db
 
 from . import (
     admin_group_id,
     admin_user_ids,
-    app_name,
     bot_token,
     is_delete_topic_as_ban_forever,
     is_delete_user_messages,
@@ -40,22 +36,17 @@ from .handlers.user import (
 )
 from .observability import stage_timer
 from .services.cleanup import cleanup_old_message_maps, enabled as cleanup_enabled
+from .services.memory_cache import rate_limit_ok
 from .services.update_processor import TokenBucket, configure_builder, user_lock
 
 BROADCAST_MAX_PARALLEL = 5
+BROADCAST_PAGE_SIZE = 500
 BROADCAST_RATE_PER_SECOND = 20
 DELETE_MESSAGES_CHUNK = 100
 
-# create_all is safe on an existing database; new indexes are added by
-# db/migrations/perf_indexes.py during deployment.
-Base.metadata.create_all(bind=engine)
-
-
-def persistence_interval() -> int:
-    try:
-        return max(1, int(os.getenv("PERSISTENCE_INTERVAL", "300")))
-    except ValueError:
-        return 300
+# Idempotent schema creation for fresh installs; existing databases are
+# upgraded by the migrations under db/migrations/ during deployment.
+init_db()
 
 
 def allowed_updates() -> list[str]:
@@ -138,15 +129,14 @@ async def forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_T
 
 async def _forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with stage_timer("handler", handler="u2a"):
-        if not disable_captcha and not await check_human(update, context):
-            return
-        if message_interval:
-            if context.user_data.get("last_message_time", 0) > time.time() - message_interval:
-                await update.message.reply_html("请不要频繁发送消息。")
-                return
-            context.user_data["last_message_time"] = time.time()
-
         user = update.effective_user
+        user_state = await run_db(repository.get_user_state, user.id)
+        if not disable_captcha and not await check_human(update, context, user_state):
+            return
+        if message_interval and not rate_limit_ok(user.id, message_interval):
+            await update.message.reply_html("请不要频繁发送消息。")
+            return
+
         u = await run_db(
             repository.get_or_create_user,
             user.id,
@@ -194,19 +184,14 @@ async def _forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_
 
         try:
             if update.message.media_group_id:
-                await run_db(
+                first = await run_db(
                     repository.add_media_group_message,
                     update.message.chat.id,
                     update.message.message_id,
                     update.message.media_group_id,
                     update.message.caption_html,
                 )
-                if update.message.media_group_id != context.user_data.get(
-                    "current_media_group_id", 0
-                ):
-                    context.user_data["current_media_group_id"] = (
-                        update.message.media_group_id
-                    )
+                if first:
                     await send_media_group_later(
                         5, user.id, chat_id, update.message.media_group_id, "u2a", context
                     )
@@ -303,18 +288,14 @@ async def _forwarding_message_a2u(update: Update, context: ContextTypes.DEFAULT_
 
         try:
             if update.message.media_group_id:
-                await run_db(
+                first = await run_db(
                     repository.add_media_group_message,
                     update.message.chat.id,
                     update.message.message_id,
                     update.message.media_group_id,
                     update.message.caption_html,
                 )
-                user_data = context.application.user_data[user_id]
-                if update.message.media_group_id != user_data.get(
-                    "current_media_group_id", 0
-                ):
-                    user_data["current_media_group_id"] = update.message.media_group_id
+                if first:
                     await send_media_group_later(
                         5,
                         update.effective_chat.id,
@@ -391,7 +372,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _broadcast(context: ContextTypes.DEFAULT_TYPE):
-    users = await run_db(repository.get_all_users)
     msg_id, chat_id = context.job.data.split("_")
     bucket = TokenBucket(BROADCAST_RATE_PER_SECOND)
     semaphore = asyncio.Semaphore(BROADCAST_MAX_PARALLEL)
@@ -420,11 +400,19 @@ async def _broadcast(context: ContextTypes.DEFAULT_TYPE):
                         else float(delay)
                     )
                 except Exception as error:
-                    results["failures"].append((user.user_id, str(error)))
+                    if len(results["failures"]) < 100:
+                        results["failures"].append((user.user_id, str(error)))
                     break
             results["failed"] += 1
 
-    await asyncio.gather(*(send_one(user) for user in users))
+    offset = 0
+    while True:
+        users = await run_db(repository.get_users_page, BROADCAST_PAGE_SIZE, offset)
+        if not users:
+            break
+        await asyncio.gather(*(send_one(user) for user in users))
+        offset += len(users)
+
     logger.info(
         f"broadcast done: success={results['success']} failed={results['failed']} "
         f"rate_limited={results['rate_limited']} failures={results['failures'][:10]}"
@@ -448,11 +436,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def error_in_send_media_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_html("错误的消息类型。退出发送媒体组。后续对话将直接转发。")
-    return ConversationHandler.END
-
-
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
     logger.error(f"Exception while handling an update: {context.error} ")
@@ -468,15 +451,10 @@ async def _cleanup_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 if __name__ == "__main__":
-    pickle_persistence = PicklePersistence(
-        filepath=f"./assets/{app_name}.pickle",
-        update_interval=persistence_interval(),
-    )
     http = http_settings()
     builder = (
         ApplicationBuilder()
         .token(bot_token)
-        .persistence(persistence=pickle_persistence)
         .connection_pool_size(http["connection_pool_size"])
         .pool_timeout(http["pool_timeout"])
         .connect_timeout(http["connect_timeout"])

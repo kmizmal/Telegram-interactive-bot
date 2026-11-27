@@ -1,0 +1,20 @@
+{
+  "host": "uk.zmal.top:7422",
+  "pid": 12791,
+  "captured_at": "2026-11-27T16:24:14+08:00",
+  "sample_window_seconds": 1800,
+  "samples": 31,
+  "rss_kb_min": 47532,
+  "rss_kb_median": 47728,
+  "rss_kb_max": 48336,
+  "rss_kb_first": 47532,
+  "rss_kb_last": 48336,
+  "rss_growth_kb": 804,
+  "vm_data_kb_min": 42220,
+  "vm_data_kb_max": 50804,
+  "threads_min": 2,
+  "threads_max": 3,
+  "target_rss_kb": 55000,
+  "target_24h_growth_kb": 3000,
+  "note": "30 分钟 idle 采样，服务全程 active、NRestarts=0；24 小时巡检仍在后台运行"
+}

@@ -23,6 +23,5 @@ os.environ.setdefault("DISABLE_CAPTCHA", "TRUE")
 os.environ.setdefault("MESSAGE_INTERVAL", "0")
 
 import db.database as _database  # noqa: E402
-import db.model as _model  # noqa: E402
 
-_model.Base.metadata.create_all(_database.engine)
+_database.init_db()

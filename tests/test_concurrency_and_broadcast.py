@@ -7,8 +7,6 @@ import pytest
 from telegram.error import BadRequest, RetryAfter
 
 from db import repository
-from db.database import session_scope
-from db.model import User
 
 main_mod = importlib.import_module("interactive-bot.__main__")
 processor = importlib.import_module("interactive-bot.services.update_processor")
@@ -58,7 +56,11 @@ async def test_user_lock_serializes_same_user():
 @pytest.mark.asyncio
 async def test_broadcast_copies_once_per_user_and_retries(monkeypatch):
     users = [SimpleNamespace(user_id=user_id) for user_id in (101, 102, 103)]
-    monkeypatch.setattr(main_mod.repository, "get_all_users", lambda: users)
+    monkeypatch.setattr(
+        main_mod.repository,
+        "get_users_page",
+        lambda limit, offset: users[offset : offset + limit],
+    )
 
     calls = []
 
@@ -81,7 +83,11 @@ async def test_broadcast_copies_once_per_user_and_retries(monkeypatch):
 @pytest.mark.asyncio
 async def test_broadcast_uses_at_most_five_parallel_sends(monkeypatch):
     users = [SimpleNamespace(user_id=user_id) for user_id in range(200, 215)]
-    monkeypatch.setattr(main_mod.repository, "get_all_users", lambda: users)
+    monkeypatch.setattr(
+        main_mod.repository,
+        "get_users_page",
+        lambda limit, offset: users[offset : offset + limit],
+    )
 
     active = 0
     peak = 0
@@ -106,8 +112,8 @@ async def test_broadcast_uses_at_most_five_parallel_sends(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_clear_retries_rate_limit_and_keeps_failed_chunk_mappings(monkeypatch):
-    with session_scope() as session:
-        session.add(User(user_id=77, message_thread_id=314))
+    repository.get_or_create_user(77, "Seed")
+    repository.set_user_thread(77, 314)
     repository.create_message_maps_batch(
         [(message_id, message_id + 1000, 77) for message_id in range(1, 251)]
         + [(1, 5000, 78)]

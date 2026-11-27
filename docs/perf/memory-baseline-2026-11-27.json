@@ -1,0 +1,12 @@
+{
+  "host": "uk.zmal.top:7422",
+  "pid": 11577,
+  "captured_at": "2026-11-27T14:56:00+08:00",
+  "sample_window_seconds": 360,
+  "rss_kb": 66816,
+  "vm_data_kb": 68556,
+  "threads": 3,
+  "vm_peak_kb": 290140,
+  "import_peak_mb": 58,
+  "note": "生产进程约 15 分钟 uptime，连续 6 分钟稳定；改造前 master @ 85a856f"
+}

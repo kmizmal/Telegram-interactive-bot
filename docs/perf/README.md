@@ -4,6 +4,16 @@
 `AsyncMock` Bot 调用真实 handler，因此测量的是应用内处理耗时（含 SQLite），不含
 Telegram 网络往返。`--real` 模式会设置测试用环境变量；生产 Token 不会被读取。
 
+运行时数据层使用标准库 `sqlite3`，不再安装 SQLAlchemy/pytz。可用下面的命令确认
+入口可导入且 SQLAlchemy 没有进入 `sys.modules`：
+
+```bash
+BOT_TOKEN=test APP_NAME=perf-probe ADMIN_GROUP_ID=-1000000000000 ADMIN_USER_IDS=1 LOG_TO_FILE=0 \
+  uv run --frozen python -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; print('runtime deps ok')"
+```
+
+采集命令：
+
 ```bash
 export UV_CACHE_DIR=/root/dsh/.uv-cache
 
@@ -20,6 +30,30 @@ rm -f "$TMPDB"
 uv run --frozen python scripts/perf_probe.py --real \
   --compare docs/perf/baseline-2026-11-27.json
 ```
+
+## 内存采样与验收
+
+改造后使用 `scripts/memory_probe.py` 从 `/proc/<pid>/status` 读取 RSS、VmData 和线程数，
+按 JSON Lines 输出。验收目标：30 分钟 idle RSS ≤55 MB；24 小时首小时与末小时中位数
+增长 ≤3 MB，线程数保持平稳。
+
+```bash
+uv run --frozen python scripts/memory_probe.py --self-check
+
+# 30 分钟验收（服务单元名按实际部署替换，例如 telegram-bot.service）
+PID=$(systemctl show -p MainPID --value telegram-bot.service)
+uv run --frozen python scripts/memory_probe.py --pid "$PID" \
+  --interval 60 --duration 1800 > /tmp/tg-memory-30m.jsonl
+
+# 24 小时巡检
+uv run --frozen python scripts/memory_probe.py --pid "$PID" \
+  --interval 300 --duration 86400 > /tmp/tg-memory-24h.jsonl
+```
+
+改造前基线：[memory-baseline-2026-11-27.json](memory-baseline-2026-11-27.json)；上线后
+[memory-after-2026-11-27.json](memory-after-2026-11-27.json) 记录 30 分钟采样结果：
+RSS 中位数 **47,728 kB**、最大 **48,336 kB**，首末增长 **804 kB**，均低于 55 MB / 3 MB
+门禁；24 小时巡检仍在后台运行，结果另补。
 
 ## 2026-11-27 结果（300 次/场景）
 

@@ -27,13 +27,23 @@ os.chdir(workdir)
 
 bot_package = importlib.import_module("interactive-bot")
 
-from db.database import Base, engine  # noqa: E402
-import db.model  # noqa: E402,F401  (register ORM models)
+from db.database import connect, init_db  # noqa: E402
 
-Base.metadata.create_all(bind=engine)
+init_db()
 
-expected_tables = {"formn_status", "media_group_message", "message_map", "user"}
-actual_tables = set(Base.metadata.tables)
+expected_tables = {
+    "formn_status",
+    "media_group_message",
+    "message_map",
+    "user",
+    "user_state",
+}
+actual_tables = {
+    row[0]
+    for row in connect().execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )
+}
 if actual_tables != expected_tables:
     raise SystemExit(f"unexpected tables: {sorted(actual_tables)}")
 
