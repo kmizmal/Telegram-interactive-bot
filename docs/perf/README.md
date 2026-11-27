@@ -8,7 +8,7 @@ Telegram 网络往返。`--real` 模式会设置测试用环境变量；生产 T
 入口可导入且 SQLAlchemy 没有进入 `sys.modules`：
 
 ```bash
-BOT_TOKEN=test APP_NAME=perf-probe ADMIN_GROUP_ID=-1000000000000 ADMIN_USER_IDS=1 \
+BOT_TOKEN=test APP_NAME=perf-probe ADMIN_GROUP_ID=-1000000000000 ADMIN_USER_IDS=1 LOG_TO_FILE=0 \
   uv run --frozen python -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; print('runtime deps ok')"
 ```
 
@@ -50,8 +50,10 @@ uv run --frozen python scripts/memory_probe.py --pid "$PID" \
   --interval 300 --duration 86400 > /tmp/tg-memory-24h.jsonl
 ```
 
-改造前基线：[memory-baseline-2026-11-27.json](memory-baseline-2026-11-27.json)；上线后另存
-`memory-after-2026-11-27.json` 作为对比。
+改造前基线：[memory-baseline-2026-11-27.json](memory-baseline-2026-11-27.json)；上线后
+[memory-after-2026-11-27.json](memory-after-2026-11-27.json) 记录 30 分钟采样结果：
+RSS 中位数 **47,728 kB**、最大 **48,336 kB**，首末增长 **804 kB**，均低于 55 MB / 3 MB
+门禁；24 小时巡检仍在后台运行，结果另补。
 
 ## 2026-11-27 结果（300 次/场景）
 
