@@ -1,11 +1,9 @@
 import asyncio
 import os
-import random
 import time
-from string import ascii_letters as letters
+from datetime import time as time_of_day
 
-import telegram
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.error import BadRequest, RetryAfter
 from telegram.ext import (
     ApplicationBuilder,
@@ -31,13 +29,18 @@ from . import (
     is_delete_topic_as_ban_forever,
     is_delete_user_messages,
     logger,
-    welcome_message,
     disable_captcha,
     message_interval,
 )
+from .handlers.user import (
+    callback_query_vcode,
+    check_human,
+    send_contact_card,
+    start,
+)
 from .observability import stage_timer
+from .services.cleanup import cleanup_old_message_maps, enabled as cleanup_enabled
 from .services.update_processor import TokenBucket, configure_builder, user_lock
-from .utils import delete_message_later
 
 BROADCAST_MAX_PARALLEL = 5
 BROADCAST_RATE_PER_SECOND = 20
@@ -46,6 +49,33 @@ DELETE_MESSAGES_CHUNK = 100
 # create_all is safe on an existing database; new indexes are added by
 # db/migrations/perf_indexes.py during deployment.
 Base.metadata.create_all(bind=engine)
+
+
+def persistence_interval() -> int:
+    try:
+        return max(1, int(os.getenv("PERSISTENCE_INTERVAL", "300")))
+    except ValueError:
+        return 300
+
+
+def allowed_updates() -> list[str]:
+    return ["message", "callback_query"]
+
+
+def http_settings() -> dict:
+    def integer(name, default):
+        try:
+            return int(os.getenv(name, str(default)))
+        except ValueError:
+            return default
+
+    return {
+        "connection_pool_size": integer("HTTP_POOL_SIZE", 8),
+        "pool_timeout": integer("HTTP_POOL_TIMEOUT", 5),
+        "connect_timeout": integer("HTTP_CONNECT_TIMEOUT", 5),
+        "read_timeout": integer("HTTP_READ_TIMEOUT", 10),
+        "write_timeout": integer("HTTP_WRITE_TIMEOUT", 20),
+    }
 
 
 # 延时发送媒体组消息的回调
@@ -99,132 +129,6 @@ async def send_media_group_later(
         _send_media_group_later, delay, chat_id=chat_id, name=name, data=media_group_id
     )
     return name
-
-
-async def send_contact_card(
-    chat_id, message_thread_id, user: telegram.User, update: Update, context: ContextTypes
-):
-    buttons = [
-        [
-            InlineKeyboardButton(
-                f"{'🏆 高级会员' if user.is_premium else '✈️ 普通会员'}",
-                url="https://github.com/MiHaKun/Telegram-interactive-bot",
-            )
-        ]
-    ]
-    if user.username:
-        buttons.append(
-            [InlineKeyboardButton("👤 直接联络", url=f"https://t.me/{user.username}")]
-        )
-
-    user_photo = await context.bot.get_user_profile_photos(user.id)
-    caption = (
-        f"👤 {mention_html(user.id, user.first_name)}\n\n"
-        f"📱 {user.id}\n\n"
-        f"🔗 @{user.username if user.username else '无'}"
-    )
-    if user_photo.total_count:
-        await context.bot.send_photo(
-            chat_id,
-            photo=user_photo.photos[0][-1].file_id,
-            caption=caption,
-            message_thread_id=message_thread_id,
-            reply_markup=InlineKeyboardMarkup(buttons),
-            parse_mode="HTML",
-        )
-    else:
-        await context.bot.send_contact(
-            chat_id,
-            phone_number="11111",
-            first_name=user.first_name,
-            last_name=user.last_name,
-            message_thread_id=message_thread_id,
-            reply_markup=InlineKeyboardMarkup(buttons),
-        )
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    await run_db(
-        repository.get_or_create_user,
-        user.id,
-        user.first_name,
-        user.last_name,
-        user.username,
-        user.is_premium,
-    )
-    if user.id in admin_user_ids:
-        logger.info(f"{user.first_name}({user.id}) is admin")
-        try:
-            bg = await context.bot.get_chat(admin_group_id)
-            if bg.type == "supergroup" or bg.type == "group":
-                logger.info(f"admin group is {bg.title}")
-        except Exception as e:
-            logger.error(f"admin group error {e}")
-            await update.message.reply_html(
-                f"⚠️⚠️后台管理群组设置错误，请检查配置。⚠️⚠️\n你需要确保已经将机器人 @{context.bot.username} 邀请入管理群组并且给与了管理员权限。\n错误细节：{e}\n"
-            )
-            return ConversationHandler.END
-        await update.message.reply_html(
-            f"你好管理员 {user.first_name}({user.id})\n\n欢迎使用 {app_name} 机器人。\n\n 目前你的配置完全正确。可以在群组 <b> {bg.title} </b> 中使用机器人。"
-        )
-    else:
-        await update.message.reply_html(
-            f"{mention_html(user.id, user.full_name)} 同学：\n\n{welcome_message}"
-        )
-
-
-async def check_human(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not context.user_data.get("is_human", False):
-        if context.user_data.get("is_human_error_time", 0) > time.time() - 120:
-            await update.message.reply_html("你已经被禁言,请稍后再尝试。")
-            return False
-        file_name = random.choice(os.listdir("./assets/imgs"))
-        code = file_name.replace("image_", "").replace(".png", "")
-        file = f"./assets/imgs/{file_name}"
-        codes = ["".join(random.sample(letters, 5)) for _ in range(0, 7)]
-        codes.append(code)
-        random.shuffle(codes)
-
-        photo = context.bot_data.get(f"image|{code}") or file
-        buttons = [
-            InlineKeyboardButton(text, callback_data=f"vcode_{text}_{user.id}")
-            for text in codes
-        ]
-        button_matrix = [buttons[i : i + 4] for i in range(0, len(buttons), 4)]
-        sent = await update.message.reply_photo(
-            photo,
-            f"{mention_html(user.id, user.first_name)}请选择图片中的文字。回答错误将无法联系客服。",
-            reply_markup=InlineKeyboardMarkup(button_matrix),
-            parse_mode="HTML",
-        )
-        biggest_photo = sorted(sent.photo, key=lambda x: x.file_size, reverse=True)[0]
-        context.bot_data[f"image|{code}"] = biggest_photo.file_id
-        context.user_data["vcode"] = code
-        await delete_message_later(60, sent.chat.id, sent.message_id, context)
-        return False
-    return True
-
-
-async def callback_query_vcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user = query.from_user
-    code = query.data.split("_")[1]
-    user_id = query.data.split("_")[2]
-    if user_id == str(user.id):
-        if code == context.user_data.get("vcode"):
-            await query.answer("正确，欢迎。")
-            await context.bot.send_message(
-                update.effective_chat.id,
-                f"{mention_html(user.id, user.first_name)} , 欢迎。",
-                parse_mode="HTML",
-            )
-            context.user_data["is_human"] = True
-        else:
-            await query.answer("~错误~，禁言2分钟")
-            context.user_data["is_human_error_time"] = time.time()
-    await query.message.delete()
 
 
 async def forwarding_message_u2a(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -447,8 +351,8 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         return
     message_ids = await run_db(repository.get_message_ids_for_user, target.user_id)
-    for start in range(0, len(message_ids), DELETE_MESSAGES_CHUNK):
-        chunk = message_ids[start : start + DELETE_MESSAGES_CHUNK]
+    for offset in range(0, len(message_ids), DELETE_MESSAGES_CHUNK):
+        chunk = message_ids[offset : offset + DELETE_MESSAGES_CHUNK]
         try:
             await context.bot.delete_messages(target.user_id, chunk)
         except BadRequest as error:
@@ -525,14 +429,33 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.debug("Exception detail is :", exc_info=context.error)
 
 
+async def _cleanup_job(context: ContextTypes.DEFAULT_TYPE):
+    result = await run_db(
+        cleanup_old_message_maps,
+        int(os.getenv("MESSAGE_MAP_RETENTION_DAYS", "90")),
+    )
+    logger.info(f"data cleanup: {result}")
+
+
 if __name__ == "__main__":
-    pickle_persistence = PicklePersistence(filepath=f"./assets/{app_name}.pickle")
+    pickle_persistence = PicklePersistence(
+        filepath=f"./assets/{app_name}.pickle",
+        update_interval=persistence_interval(),
+    )
+    http = http_settings()
     builder = (
         ApplicationBuilder()
         .token(bot_token)
         .persistence(persistence=pickle_persistence)
+        .connection_pool_size(http["connection_pool_size"])
+        .pool_timeout(http["pool_timeout"])
+        .connect_timeout(http["connect_timeout"])
+        .read_timeout(http["read_timeout"])
+        .write_timeout(http["write_timeout"])
     )
     application = configure_builder(builder).build()
+    if cleanup_enabled():
+        application.job_queue.run_daily(_cleanup_job, time=time_of_day(hour=3, minute=0))
 
     application.add_handler(CommandHandler("start", start, filters.ChatType.PRIVATE))
     application.add_handler(
@@ -555,4 +478,4 @@ if __name__ == "__main__":
         CallbackQueryHandler(callback_query_vcode, pattern="^vcode_")
     )
     application.add_error_handler(error_handler)
-    application.run_polling()
+    application.run_polling(allowed_updates=allowed_updates())

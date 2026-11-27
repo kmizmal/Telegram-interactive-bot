@@ -6,6 +6,7 @@ boundary: every function returns a plain DTO or a scalar.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from db.database import session_scope
 from db.model import FormnStatus, MediaGroupMesssage, MessageMap, User
@@ -236,6 +237,24 @@ def delete_message_maps(message_ids) -> None:
         (
             session.query(MessageMap)
             .filter(MessageMap.user_chat_message_id.in_(message_ids))
+            .delete(synchronize_session=False)
+        )
+
+
+def count_old_message_maps(cutoff: datetime) -> int:
+    with session_scope() as session:
+        return (
+            session.query(MessageMap)
+            .filter(MessageMap.created_at < cutoff)
+            .count()
+        )
+
+
+def delete_old_message_maps(cutoff: datetime) -> int:
+    with session_scope() as session:
+        return (
+            session.query(MessageMap)
+            .filter(MessageMap.created_at < cutoff)
             .delete(synchronize_session=False)
         )
 
