@@ -177,7 +177,7 @@ docker run --rm --entrypoint id telegram-interactive-bot:latest
 
 # 确认依赖和项目入口可导入（不连接 Telegram，并确认 SQLAlchemy 不在运行时）
 docker run --rm --env-file .env --entrypoint /app/.venv/bin/python telegram-interactive-bot:latest \
-  -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; import telegram, httpx, dotenv, apscheduler; print('deps ok')"
+  -c "import importlib, sys; importlib.import_module('interactive-bot.__main__'); assert 'sqlalchemy' not in sys.modules; import telegram, httpx, dotenv; print('deps ok')"
 ```
 
 ## 三、性能配置、迁移与观测

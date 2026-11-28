@@ -73,3 +73,14 @@ RSS 中位数 **47,728 kB**、最大 **48,336 kB**，首末增长 **804 kB**，�
 
 原始 JSON：[baseline-2026-11-27.json](baseline-2026-11-27.json)、
 [after-2026-11-27.json](after-2026-11-27.json)。
+
+## 2026-11-28 内存后续优化
+
+- 用 `interactive-bot/services/task_scheduler.py` 的 asyncio `TaskScheduler` 替代
+  `python-telegram-bot[job-queue]` / `APScheduler`；`uv.lock` 同时移除 `tzlocal`、`tzdata`。
+- uk 上完整应用导入 `ru_maxrss`：约 **44.8 MB → 43.3 MB**；`apscheduler_loaded=False`。
+- 生产进程口径（同日）：cgroup `anon≈34.1 MB`、`MemoryCurrent≈34.9 MB`；`ps` 的
+  `VmRSS≈48.4 MB` 中包含约 10.6 MB 共享 clean pages，不能直接当作独占内存。
+- 整机 `PSI memory some avg10=0.00`、`available≈518 MB`；当前最大进程是
+  `xboard-node`（RSS≈80.5 MB）与 `systemd-journald`（≈51.2 MB，主要是 journal 文件 cache），
+  bot 不是整机内存压力的主源。

@@ -79,6 +79,7 @@ def test_pyproject_does_not_depend_on_sqlalchemy_or_pytz():
     dependencies = [item.lower() for item in data["project"]["dependencies"]]
     assert not any("sqlalchemy" in item for item in dependencies)
     assert not any("pytz" in item for item in dependencies)
+    assert not any("apscheduler" in item for item in dependencies)
 
 
 def test_runtime_does_not_import_sqlalchemy():

@@ -37,6 +37,7 @@ from .handlers.user import (
 from .observability import stage_timer
 from .services.cleanup import cleanup_old_message_maps, enabled as cleanup_enabled
 from .services.memory_cache import rate_limit_ok
+from .services.task_scheduler import TaskScheduler
 from .services.update_processor import TokenBucket, configure_builder, user_lock
 
 BROADCAST_MAX_PARALLEL = 5
@@ -462,6 +463,7 @@ if __name__ == "__main__":
         .connect_timeout(http["connect_timeout"])
         .read_timeout(http["read_timeout"])
         .write_timeout(http["write_timeout"])
+        .job_queue(TaskScheduler())
     )
     application = configure_builder(builder).build()
     if cleanup_enabled():
