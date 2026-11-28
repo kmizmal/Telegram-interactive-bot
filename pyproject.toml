@@ -5,10 +5,9 @@ description = "Telegram interactive bot - bidirectional customer service robot"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "python-telegram-bot[job-queue] >= 22.8",
+    "python-telegram-bot >= 22.8",
     "python-dotenv >= 1.2.4",
     "httpx >= 0.28.1",
-    "apscheduler >= 3.11.3",
 ]
 
 [tool.uv]
