@@ -58,8 +58,10 @@ async def test_broadcast_copies_once_per_user_and_retries(monkeypatch):
     users = [SimpleNamespace(user_id=user_id) for user_id in (101, 102, 103)]
     monkeypatch.setattr(
         main_mod.repository,
-        "get_users_page",
-        lambda limit, offset: users[offset : offset + limit],
+        "get_users_page_after",
+        lambda limit, after_user_id: [
+            user for user in users if user.user_id > after_user_id
+        ][:limit],
     )
 
     calls = []
@@ -85,8 +87,10 @@ async def test_broadcast_uses_at_most_five_parallel_sends(monkeypatch):
     users = [SimpleNamespace(user_id=user_id) for user_id in range(200, 215)]
     monkeypatch.setattr(
         main_mod.repository,
-        "get_users_page",
-        lambda limit, offset: users[offset : offset + limit],
+        "get_users_page_after",
+        lambda limit, after_user_id: [
+            user for user in users if user.user_id > after_user_id
+        ][:limit],
     )
 
     active = 0

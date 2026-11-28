@@ -81,6 +81,32 @@ def test_repository_roundtrip():
     assert repository.get_user_by_user_id(1001).message_thread_id == 77
 
 
+def test_get_or_create_existing_user_does_not_write():
+    database.init_db()
+    repository.get_or_create_user(1101, "Existing")
+    statements = []
+    database.set_trace_callback(statements.append)
+    try:
+        user = repository.get_or_create_user(1101, "Updated")
+    finally:
+        database.set_trace_callback(None)
+
+    assert user.user_id == 1101
+    assert not any(
+        statement.lstrip().upper().startswith("INSERT") for statement in statements
+    )
+
+
+def test_get_users_page_after_returns_users_after_cursor():
+    database.init_db()
+    for user_id in (3301, 3302, 3303):
+        repository.get_or_create_user(user_id, f"User {user_id}")
+
+    page = repository.get_users_page_after(2, 3301)
+    assert [user.user_id for user in page] == [3302, 3303]
+    assert repository.get_users_page_after(10, 3303) == []
+
+
 def test_repository_batch_insert_commits_once():
     database.init_db()
     statements = []
