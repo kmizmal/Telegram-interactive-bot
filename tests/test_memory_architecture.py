@@ -60,11 +60,11 @@ def test_media_group_first_flag():
 async def test_broadcast_fetches_users_in_pages(monkeypatch):
     pages = []
 
-    def fake_page(limit, offset):
-        pages.append((limit, offset))
-        return [SimpleNamespace(user_id=1)] if offset == 0 else []
+    def fake_page(limit, after_user_id):
+        pages.append((limit, after_user_id))
+        return [SimpleNamespace(user_id=1)] if after_user_id == 0 else []
 
-    monkeypatch.setattr(main_mod.repository, "get_users_page", fake_page)
+    monkeypatch.setattr(main_mod.repository, "get_users_page_after", fake_page)
     context = probe.make_context(probe._configured_bot())
     context.job = SimpleNamespace(data="555_-1001")
 

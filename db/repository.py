@@ -65,7 +65,16 @@ def get_or_create_user(
     username=None,
     is_premium=None,
 ) -> UserDTO:
-    """Look up a user and create it in the same short transaction if absent."""
+    """Look up a user, creating it only when the fast read misses."""
+    with read_connection() as connection:
+        row = connection.execute(
+            "SELECT user_id, message_thread_id, first_name, last_name, username, is_premium "
+            "FROM user WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    if row is not None:
+        return _user_dto(row)
+
     with transaction() as connection:
         connection.execute(
             """
@@ -315,11 +324,27 @@ def delete_media_group_messages(media_group_id, chat_id) -> None:
 
 
 def get_users_page(limit, offset) -> list[UserDTO]:
+    """Offset pagination; kept for compatibility with small callers."""
     with read_connection() as connection:
         rows = connection.execute(
             "SELECT user_id, message_thread_id, first_name, last_name, username, is_premium "
             "FROM user ORDER BY id LIMIT ? OFFSET ?",
             (limit, offset),
+        ).fetchall()
+        return [_user_dto(row) for row in rows]
+
+
+def get_users_page_after(limit, after_user_id=0) -> list[UserDTO]:
+    """Keyset pagination: return the next page after ``after_user_id``.
+
+    ``user_id`` has a unique index and is the stable ordering key, so this
+    avoids the O(n²) rescans of ``LIMIT/OFFSET`` during a broadcast.
+    """
+    with read_connection() as connection:
+        rows = connection.execute(
+            "SELECT user_id, message_thread_id, first_name, last_name, username, is_premium "
+            "FROM user WHERE user_id > ? ORDER BY user_id LIMIT ?",
+            (after_user_id, limit),
         ).fetchall()
         return [_user_dto(row) for row in rows]
 

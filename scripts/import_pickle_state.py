@@ -61,7 +61,7 @@ def main(argv=None) -> int:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_state'"
         ).fetchone()
         if table_exists is None:
-            print(f"user_state table missing: run db.migrations.user_state first")
+            print("user_state table missing: run db.migrations.user_state first")
             return 2
         for raw_user_id, state in user_data.items():
             if not isinstance(state, dict):

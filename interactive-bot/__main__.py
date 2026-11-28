@@ -405,13 +405,15 @@ async def _broadcast(context: ContextTypes.DEFAULT_TYPE):
                     break
             results["failed"] += 1
 
-    offset = 0
+    last_user_id = 0
     while True:
-        users = await run_db(repository.get_users_page, BROADCAST_PAGE_SIZE, offset)
+        users = await run_db(
+            repository.get_users_page_after, BROADCAST_PAGE_SIZE, last_user_id
+        )
         if not users:
             break
         await asyncio.gather(*(send_one(user) for user in users))
-        offset += len(users)
+        last_user_id = users[-1].user_id
 
     logger.info(
         f"broadcast done: success={results['success']} failed={results['failed']} "
